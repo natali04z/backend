@@ -61,34 +61,57 @@ function validatePurchaseData(data, isUpdate = false) {
 // GET: Retrieve all purchases
 export const getPurchases = async (req, res) => {
     try {        
-        if (!checkPermission(req.user.role, "view_purchases")) {
+        // Verificar si req.user existe antes de acceder a su propiedad role
+        if (!req.user || !checkPermission(req.user.role, "view_purchases")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const purchases = await Purchase.find()
-            .select("id total details purchaseDate product")
-            .populate("product", "name");
+        // Consultar todas las compras
+        console.log("Ejecutando consulta de compras");
+        const purchases = await Purchase.find();
+        console.log(`Encontradas ${purchases.length} compras`);
 
-        // Format the date in the response
+        // Formato para la respuesta, manejar tanto la estructura antigua como la nueva
         const formattedPurchases = purchases.map(purchase => {
             const purchaseObj = purchase.toObject();
+            
+            // Formatear la fecha de compra
             if (purchaseObj.purchaseDate) {
                 purchaseObj.purchaseDate = new Date(purchaseObj.purchaseDate).toISOString().split('T')[0];
             }
+            
+            // Manejar el caso donde tenemos un array de productos (nueva estructura)
+            if (Array.isArray(purchaseObj.products)) {
+                // Ya tenemos la estructura correcta, pero podríamos formatear algo si es necesario
+            } 
+            // Manejar el caso donde tenemos una referencia simple a producto (estructura antigua)
+            else if (purchaseObj.product) {
+                // Convertir la estructura antigua a la nueva para mantener consistencia
+                purchaseObj.products = [{
+                    product: purchaseObj.product,
+                    quantity: 1,
+                    price: purchaseObj.total,
+                    total: purchaseObj.total
+                }];
+                // Podríamos eliminar el campo antiguo si queremos
+                // delete purchaseObj.product;
+            }
+            
             return purchaseObj;
         });
 
         res.status(200).json(formattedPurchases);
     } catch (error) {
         console.error("Error fetching purchases:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
 // GET: Retrieve a single purchase by ID
 export const getPurchaseById = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "view_purchases_id")) {
+        // Verificar si req.user existe antes de acceder a su propiedad role
+        if (!req.user || !checkPermission(req.user.role, "view_purchases_id")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -98,24 +121,30 @@ export const getPurchaseById = async (req, res) => {
             return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        const purchase = await Purchase.findById(id)
-            .select("id total details purchaseDate")
-            .populate("product", "name price");
+        const purchase = await Purchase.findById(id);
 
         if (!purchase) {
             return res.status(404).json({ message: "Purchase not found" });
         }
 
-        // Format the date in the response
+        // Formatear la respuesta según la estructura de la compra
         const formattedPurchase = purchase.toObject();
+        
+        // Formatear la fecha de compra
         if (formattedPurchase.purchaseDate) {
             formattedPurchase.purchaseDate = new Date(formattedPurchase.purchaseDate).toISOString().split('T')[0];
+        }
+        
+        // Si existe el array de productos, poblar información de cada producto
+        if (Array.isArray(formattedPurchase.products)) {
+            // Opcionalmente podríamos poblar información adicional de los productos
+            // Podría requerir consultas adicionales
         }
 
         res.status(200).json(formattedPurchase);
     } catch (error) {
         console.error("Error fetching purchase:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
