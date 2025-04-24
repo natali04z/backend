@@ -136,7 +136,8 @@ export const getSaleById = async (req, res) => {
 // POST: Create new sale
 export const postSale = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "create_sales")) {
+        // Check if req.user exists before accessing its role property
+        if (!req.user || !checkPermission(req.user.role, "create_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -214,7 +215,8 @@ export const postSale = async (req, res) => {
 // PUT: Update an existing sale
 export const updateSale = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "edit_sales")) {
+        // Check if req.user exists before accessing its role property
+        if (!req.user || !checkPermission(req.user.role, "edit_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -322,7 +324,8 @@ export const updateSale = async (req, res) => {
 // DELETE: Remove a sale by ID
 export const deleteSale = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "delete_sales")) {
+        // Check if req.user exists before accessing its role property
+        if (!req.user || !checkPermission(req.user.role, "delete_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -348,10 +351,10 @@ export const deleteSale = async (req, res) => {
 // ===== EXPORT FUNCTIONS =====
 
 // GET: Generate a PDF report of sales
-// GET: Generate a PDF report of sales
 export const exportSalesPDF = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "view_sales")) {
+        // Check if req.user exists before accessing its role property
+        if (!req.user || !checkPermission(req.user.role, "view_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -421,7 +424,8 @@ export const exportSalesPDF = async (req, res) => {
 
 export const exportSalesExcel = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "view_sales")) {
+        // Check if req.user exists before accessing its role property
+        if (!req.user || !checkPermission(req.user.role, "view_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
         
@@ -779,124 +783,4 @@ function addExcelHeader(worksheet, startDate, endDate, customerId, styles) {
     const dateCell = worksheet.getCell('A5');
     dateCell.value = `Generado: ${new Date().toLocaleString('es-CO')}`;
     dateCell.style = { font: { size: 10, italic: true }, alignment: { horizontal: 'left', vertical: 'middle' } };
-}
-
-function addExcelSummary(worksheet, salesCount, itemsCount, totalAmount) {
-    // Add summary title
-    worksheet.mergeCells('A7:H7');
-    const summaryTitle = worksheet.getCell('A7');
-    summaryTitle.value = 'Resumen';
-    summaryTitle.style = {
-        font: { bold: true, size: 12 },
-        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } },
-        alignment: { horizontal: 'left', vertical: 'middle' }
-    };
-    
-    // Add summary data
-    worksheet.mergeCells('A8:G8');
-    worksheet.getCell('A8').value = 'Total de Ventas:';
-    worksheet.getCell('A8').style = { font: { bold: true }, alignment: { horizontal: 'right' } };
-    worksheet.getCell('H8').value = salesCount;
-    
-    worksheet.mergeCells('A9:G9');
-    worksheet.getCell('A9').value = 'Artículos Vendidos:';
-    worksheet.getCell('A9').style = { font: { bold: true }, alignment: { horizontal: 'right' } };
-    worksheet.getCell('H9').value = itemsCount;
-    
-    worksheet.mergeCells('A10:G10');
-    worksheet.getCell('A10').value = 'Total:';
-    worksheet.getCell('A10').style = { font: { bold: true }, alignment: { horizontal: 'right' } };
-    worksheet.getCell('H10').value = totalAmount;
-    worksheet.getCell('H10').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-}
-
-function addExcelSalesData(worksheet, sales, tableStartRow, styles) {
-    // Style headers row
-    const headerRow = worksheet.getRow(tableStartRow);
-    headerRow.height = 20;
-    headerRow.eachCell(cell => { cell.style = styles.headerStyle; });
-    
-    // Flatten sales data (one product per row)
-    let tableData = [];
-    sales.forEach(sale => {
-        sale.products.forEach(product => {
-            tableData.push({
-                id: sale._id,
-                date: new Date(sale.salesDate),
-                customer: sale.customer ? sale.customer.name : 'Desconocido',
-                product: product.product ? product.product.name : 'Desconocido',
-                quantity: product.quantity,
-                price: product.price,
-                productTotal: product.quantity * product.price,
-                total: sale.total
-            });
-        });
-    });
-    
-    // Add data rows
-    let rowNumber = tableStartRow + 1;
-    tableData.forEach((row, index) => {
-        const excelRow = worksheet.addRow({
-            id: row.id,
-            date: row.date,
-            customer: row.customer,
-            product: row.product,
-            quantity: row.quantity,
-            price: row.price,
-            productTotal: row.productTotal,
-            total: row.total
-        });
-        
-        // Apply alternating row styles
-        const rowStyle = index % 2 === 0 ? styles.rowEvenStyle : styles.rowOddStyle;
-        excelRow.eachCell(cell => {
-            cell.style = { 
-                ...cell.style,
-                ...rowStyle,
-                border: {
-                    top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                    left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                    bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                    right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                }
-            };
-        });
-        
-        rowNumber++;
-    });
-    
-    return rowNumber;
-}
-
-function formatExcelColumns(worksheet) {
-    // Format date column
-    worksheet.getColumn('date').numFmt = 'dd/mm/yyyy';
-    
-    // Format currency columns
-    const currencyFormat = '"$"#,##0_-;[Red]-"$"#,##0_-';
-    worksheet.getColumn('price').numFmt = currencyFormat;
-    worksheet.getColumn('price').alignment = { horizontal: 'right' };
-    
-    worksheet.getColumn('productTotal').numFmt = currencyFormat;
-    worksheet.getColumn('productTotal').alignment = { horizontal: 'right' };
-    
-    worksheet.getColumn('total').numFmt = currencyFormat;
-    worksheet.getColumn('total').alignment = { horizontal: 'right' };
-}
-
-function addExcelTotalsRow(worksheet, rowNumber, totalAmount, totalStyle) {
-    const totalsRow = worksheet.addRow(['Total', '', '', '', '', '', '', totalAmount]);
-    totalsRow.eachCell(cell => { cell.style = totalStyle; });
-    worksheet.getCell(`H${rowNumber}`).numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-}
-
-function addExcelFooter(worksheet, rowNumber) {
-    const footerRow = rowNumber + 2;
-    worksheet.mergeCells(`A${footerRow}:H${footerRow}`);
-    const footerCell = worksheet.getCell(`A${footerRow}`);
-    footerCell.value = 'IceSoft - Sistema de Gestión de Ventas';
-    footerCell.style = {
-        font: { size: 8, italic: true, color: { argb: 'FF666666' } },
-        alignment: { horizontal: 'center' }
-    };
 }
