@@ -63,6 +63,7 @@ function validateSaleData(data, isUpdate = false) {
 }
 
 // GET: Retrieve all sales
+// GET: Retrieve all sales
 export const getSales = async (req, res) => {
     try {
         // Check if req.user exists before accessing its role property
@@ -74,7 +75,7 @@ export const getSales = async (req, res) => {
         console.log("Executing sales query");
         const sales = await Sale.find()
             .populate("customer", "name")
-            .populate("products.product", "name");
+            .populate("products.product", "name price"); // Also populate price
         console.log(`Found ${sales.length} sales`);
 
         // Format response
@@ -84,6 +85,26 @@ export const getSales = async (req, res) => {
             // Format sale date
             if (saleObj.salesDate) {
                 saleObj.salesDate = new Date(saleObj.salesDate).toISOString().split('T')[0];
+            }
+            
+            // Ensure product information is consistent
+            if (saleObj.products && Array.isArray(saleObj.products)) {
+                saleObj.products = saleObj.products.map(product => {
+                    // Calculate or verify product total
+                    if (!product.total || product.total !== product.price * product.quantity) {
+                        product.total = product.price * product.quantity;
+                    }
+                    return product;
+                });
+            } else {
+                // Handle case where products might be missing
+                saleObj.products = [];
+            }
+            
+            // Verify or recalculate sale total
+            const calculatedTotal = saleObj.products.reduce((sum, item) => sum + item.total, 0);
+            if (!saleObj.total || Math.abs(saleObj.total - calculatedTotal) > 0.01) {
+                saleObj.total = calculatedTotal;
             }
             
             return saleObj;
@@ -112,7 +133,7 @@ export const getSaleById = async (req, res) => {
 
         const sale = await Sale.findById(id)
             .populate("customer", "name")
-            .populate("products.product", "name");
+            .populate("products.product", "name price");
 
         if (!sale) {
             return res.status(404).json({ message: "Sale not found" });
@@ -124,6 +145,31 @@ export const getSaleById = async (req, res) => {
         // Format the sale date
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
+        }
+        
+        // Ensure product information is consistent
+        if (formattedSale.products && Array.isArray(formattedSale.products)) {
+            formattedSale.products = formattedSale.products.map(product => {
+                // Make sure product object has all required properties
+                if (!product.product) {
+                    product.product = { name: "Unknown Product" };
+                }
+                
+                // Calculate or verify product total
+                if (!product.total || product.total !== product.price * product.quantity) {
+                    product.total = product.price * product.quantity;
+                }
+                return product;
+            });
+        } else {
+            // Handle case where products might be missing
+            formattedSale.products = [];
+        }
+        
+        // Verify or recalculate sale total
+        const calculatedTotal = formattedSale.products.reduce((sum, item) => sum + item.total, 0);
+        if (!formattedSale.total || Math.abs(formattedSale.total - calculatedTotal) > 0.01) {
+            formattedSale.total = calculatedTotal;
         }
 
         res.status(200).json(formattedSale);
@@ -171,13 +217,18 @@ export const postSale = async (req, res) => {
             if (!product) {
                 return res.status(404).json({ message: `Product not found at index ${i}` });
             }
-
+            
+            // Use product's price from database if not provided
+            const price = item.price || product.price;
+            
             // Calculate totals
-            const itemTotal = item.price * item.quantity;
+            const quantity = item.quantity || 1;
+            const itemTotal = price * quantity;
+            
             validatedProducts.push({ 
                 product: item.product,
-                quantity: item.quantity,
-                price: item.price,
+                quantity: quantity,
+                price: price,
                 total: itemTotal 
             });
             total += itemTotal;
@@ -216,7 +267,7 @@ export const postSale = async (req, res) => {
 export const updateSale = async (req, res) => {
     try {
         // Check if req.user exists before accessing its role property
-        if (!req.user || !checkPermission(req.user.role, "edit_sales")) {
+        if (!req.user || !checkPermission(req.user.role, "update_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -271,11 +322,19 @@ export const updateSale = async (req, res) => {
                     return res.status(404).json({ message: `Product not found at index ${i}` });
                 }
                 
-                const itemTotal = item.price * item.quantity;
+                // Use product's price from database if not provided
+                const price = item.price || product.price;
+                
+                // Ensure quantity is valid
+                const quantity = item.quantity || 1;
+                
+                // Calculate item total
+                const itemTotal = price * quantity;
+                
                 updatedProducts.push({
                     product: item.product, 
-                    quantity: item.quantity,
-                    price: item.price,
+                    quantity: quantity,
+                    price: price,
                     total: itemTotal
                 });
                 total += itemTotal;
