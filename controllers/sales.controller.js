@@ -348,277 +348,68 @@ export const deleteSale = async (req, res) => {
 // ===== EXPORT FUNCTIONS =====
 
 // GET: Generate a PDF report of sales
+// GET: Generate a PDF report of sales
 export const exportSalesPDF = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        // Parse query parameters for filtering
         const { startDate, endDate, customerId } = req.query;
-        
-        // Build query object based on filters
-        let query = {};
-        
-        // Add date range filter
-        if (startDate || endDate) {
-            query.salesDate = {};
-            if (startDate) query.salesDate.$gte = new Date(startDate);
-            if (endDate) query.salesDate.$lte = new Date(endDate);
-        }
-        
-        // Add customer filter
-        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
-            query.customer = customerId;
-        }
-        
-        // Fetch sales with filters
-        const sales = await Sale.find(query)
-            .sort({ salesDate: -1 })
-            .populate("customer", "name")
-            .populate("products.product", "name");
+        const sales = await fetchFilteredSales(startDate, endDate, customerId);
             
         if (sales.length === 0) {
             return res.status(404).json({ message: "No sales found for the specified criteria" });
         }
         
-        // Fetch company info
-        const companyName = "IceSoft"; // You can get this from a configuration
+        const companyName = "IceSoft";
         
-        // Create PDF document with better styling
+        // Create PDF document
         const doc = new PDFDocument({
             margin: 50,
             size: 'A4',
             info: {
                 Title: 'Informe de Ventas',
                 Author: companyName,
-                Subject: 'Informe de Ventas',
-                Keywords: 'ventas, informe, pdf',
-                Creator: 'IceSoft System',
-                Producer: 'PDFKit'
+                Creator: 'IceSoft System'
             }
         });
         
         // Set response headers
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=informe-ventas-${Date.now()}.pdf`);
-        
-        // Pipe the PDF document to the response
         doc.pipe(res);
         
-        // Define colors
-        const primaryColor = '#336699';
-        const secondaryColor = '#f5f5f5';
-        const textColor = '#333333';
-        const headerTextColor = '#ffffff';
-        const borderColor = '#cccccc';
-        
-        // Function to format currency in Colombian format
-        const formatCOP = (amount) => {
-            return new Intl.NumberFormat('es-CO', { 
-                style: 'currency', 
-                currency: 'COP',
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0
-            }).format(amount);
+        // Define style constants
+        const styles = {
+            primary: '#336699',
+            secondary: '#f5f5f5',
+            text: '#333333',
+            headerText: '#ffffff',
+            border: '#cccccc'
         };
         
-        // Get current time
+        // Format date and currency helpers
         const now = new Date();
-        const formattedDate = now.toLocaleDateString('es-CO');
-        const formattedTime = now.toLocaleTimeString('es-CO');
+        const formatCOP = (amount) => new Intl.NumberFormat('es-CO', { 
+            style: 'currency', currency: 'COP', minimumFractionDigits: 0 
+        }).format(amount);
         
-        // Add header with title
-        doc.rect(50, 50, doc.page.width - 100, 80)
-           .fillAndStroke(primaryColor, primaryColor);
+        // Add document header
+        addPDFHeader(doc, companyName, now, styles);
         
-        doc.fillColor(headerTextColor)
-           .font('Helvetica-Bold')
-           .fontSize(24)
-           .text(companyName, 70, 70);
-           
-        doc.fontSize(16)
-           .text('Informe de Ventas', 70, 100);
-        
-        // Add date
-        doc.font('Helvetica')
-           .fontSize(10)
-           .fillColor(headerTextColor)
-           .text(`Generado: ${formattedDate} ${formattedTime}`, 
-                 70, 120, { align: 'left' });
-           
         // Add report info section
-        doc.rect(50, 150, doc.page.width - 100, 70)
-           .fillAndStroke(secondaryColor, borderColor);
-           
-        doc.fillColor(textColor)
-           .fontSize(12)
-           .font('Helvetica-Bold')
-           .text('Parámetros del Informe:', 70, 160);
-           
-        doc.font('Helvetica')
-           .fontSize(10);
+        addPDFReportInfo(doc, startDate, endDate, customerId, styles);
         
-        let infoY = 180;
-        
-        doc.text(`Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`, 70, infoY);
-        infoY += 15;
-        
-        if (customerId) {
-            const customer = await Customer.findById(customerId);
-            if (customer) {
-                doc.text(`Cliente: ${customer.name}`, 70, infoY);
-                infoY += 15;
-            }
-        } else {
-            doc.text('Cliente: Todos', 70, infoY);
-            infoY += 15;
-        }
-        
-        // Add simplified summary section
+        // Add summary section
         const totalAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
+        addPDFSummary(doc, sales.length, totalAmount, styles);
         
-        doc.rect(50, 240, doc.page.width - 100, 60)
-           .fillAndStroke('#e6f7ff', borderColor);
-           
-        doc.fillColor(textColor)
-           .fontSize(14)
-           .font('Helvetica-Bold')
-           .text('Resumen', 70, 250);
-           
-        doc.font('Helvetica')
-           .fontSize(10);
-           
-        doc.text(`Total de Ventas: ${sales.length}`, 70, 270);
-        doc.text(`Total: ${formatCOP(totalAmount)}`, 70, 285);
+        // Add sales table
+        addPDFSalesTable(doc, sales, styles, formatCOP);
         
-        // Add table header (more compact to reduce pages)
-        const tableTop = 320;
-        const tableHeaders = ['ID', 'Fecha', 'Cliente', 'Producto', 'Cantidad', 'Total'];
-        const colWidths = [60, 70, 90, 120, 60, 90];
-        
-        // Draw table header background
-        doc.rect(50, tableTop, doc.page.width - 100, 20)
-           .fillAndStroke(primaryColor, primaryColor);
-        
-        // Draw table header text
-        let currentX = 50;
-        tableHeaders.forEach((header, i) => {
-            doc.font('Helvetica-Bold')
-               .fontSize(10)
-               .fillColor(headerTextColor)
-               .text(header, currentX + 5, tableTop + 6, { width: colWidths[i], align: i === 5 ? 'right' : 'left' });
-            currentX += colWidths[i];
-        });
-        
-        // Draw table rows
-        let y = tableTop + 20;
-        
-        for (let i = 0; i < sales.length; i++) {
-            const sale = sales[i];
-            
-            for (let j = 0; j < sale.products.length; j++) {
-                const product = sale.products[j];
-                
-                // Add new page if necessary
-                if (y > 700) {
-                    doc.addPage();
-                    y = 50;
-                    
-                    // Add table header in new page
-                    doc.rect(50, y, doc.page.width - 100, 20)
-                       .fillAndStroke(primaryColor, primaryColor);
-                    
-                    currentX = 50;
-                    tableHeaders.forEach((header, i) => {
-                        doc.font('Helvetica-Bold')
-                           .fontSize(10)
-                           .fillColor(headerTextColor)
-                           .text(header, currentX + 5, y + 6, { width: colWidths[i], align: i === 5 ? 'right' : 'left' });
-                        currentX += colWidths[i];
-                    });
-                    
-                    y += 20;
-                }
-                
-                // Alternate row colors
-                if ((i + j) % 2 === 0) {
-                    doc.rect(50, y, doc.page.width - 100, 20)
-                       .fillAndStroke('#f9f9f9', borderColor);
-                } else {
-                    doc.rect(50, y, doc.page.width - 100, 20)
-                       .fillAndStroke('#ffffff', borderColor);
-                }
-                
-                // Add row data
-                doc.font('Helvetica')
-                   .fontSize(9)
-                   .fillColor(textColor);
-                
-                currentX = 50;
-                
-                // ID
-                doc.text(sale.id, currentX + 5, y + 6, { width: colWidths[0], align: 'left' });
-                currentX += colWidths[0];
-                
-                // Date
-                const formattedSaleDate = new Date(sale.salesDate).toLocaleDateString('es-CO');
-                doc.text(formattedSaleDate, currentX + 5, y + 6, { width: colWidths[1], align: 'left' });
-                currentX += colWidths[1];
-                
-                // Customer
-                const customerName = sale.customer ? sale.customer.name : 'Desconocido';
-                doc.text(customerName, currentX + 5, y + 6, { width: colWidths[2], align: 'left' });
-                currentX += colWidths[2];
-                
-                // Product
-                const productName = product.product ? product.product.name : 'Desconocido';
-                doc.text(productName, currentX + 5, y + 6, { width: colWidths[3], align: 'left' });
-                currentX += colWidths[3];
-                
-                // Quantity
-                doc.text(product.quantity.toString(), currentX + 5, y + 6, { width: colWidths[4], align: 'center' });
-                currentX += colWidths[4];
-                
-                // Total (Colombian format)
-                doc.text(formatCOP(product.total), currentX + 5, y + 6, { width: colWidths[5], align: 'right' });
-                
-                y += 20;
-            }
-        }
-        
-        // Add footer
-        const pageCount = doc.bufferedPageRange().count;
-        for (let i = 0; i < pageCount; i++) {
-            doc.switchToPage(i);
-            
-            // Add page number
-            doc.font('Helvetica')
-               .fontSize(8)
-               .fillColor('#999999')
-               .text(
-                 `Página ${i + 1} de ${pageCount}`,
-                 50,
-                 doc.page.height - 50,
-                 { align: 'center', width: doc.page.width - 100 }
-               );
-            
-            // Add footer line
-            doc.moveTo(50, doc.page.height - 60)
-               .lineTo(doc.page.width - 50, doc.page.height - 60)
-               .stroke(borderColor);
-            
-            // Add company footer
-            doc.font('Helvetica')
-               .fontSize(8)
-               .fillColor('#666666')
-               .text(
-                 `${companyName} - Sistema de Gestión de Ventas`,
-                 50,
-                 doc.page.height - 40,
-                 { align: 'center', width: doc.page.width - 100 }
-               );
-        }
+        // Add footer to all pages
+        addPDFFooter(doc, companyName, styles);
         
         // Finalize PDF
         doc.end();
@@ -634,66 +425,275 @@ export const exportSalesExcel = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
         
-        // Parse query parameters for filtering
         const { startDate, endDate, customerId } = req.query;
-        
-        // Build query object based on filters
-        let query = {};
-        
-        // Add date range filter
-        if (startDate || endDate) {
-            query.salesDate = {};
-            if (startDate) query.salesDate.$gte = new Date(startDate);
-            if (endDate) query.salesDate.$lte = new Date(endDate);
-        }
-        
-        // Add customer filter
-        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
-            query.customer = customerId;
-        }
-        
-        // Fetch sales with filters
-        const sales = await Sale.find(query)
-            .sort({ salesDate: -1 })
-            .populate("customer", "name")
-            .populate("products.product", "name");
+        const sales = await fetchFilteredSales(startDate, endDate, customerId);
             
         if (sales.length === 0) {
             return res.status(404).json({ message: "No sales found for the specified criteria" });
         }
 
-        // Create a new Excel workbook with improved styling
+        // Create Excel workbook
         const workbook = new ExcelJS.Workbook();
         workbook.creator = 'IceSoft System';
         workbook.created = new Date();
-        workbook.modified = new Date();
-        workbook.lastPrinted = new Date();
-        workbook.properties.date1904 = true;
         
-        // Add a worksheet
+        // Add worksheet
         const worksheet = workbook.addWorksheet('Informe de Ventas', {
-            pageSetup: {
-                paperSize: 9, // A4
-                orientation: 'portrait',
-                fitToPage: true,
-                fitToWidth: 1,
-                fitToHeight: 0,
-                margins: {
-                    left: 0.7, right: 0.7,
-                    top: 0.75, bottom: 0.75,
-                    header: 0.3, footer: 0.3
-                }
-            }
+            pageSetup: { paperSize: 9, orientation: 'portrait', fitToWidth: 1 }
         });
         
         // Define styles
-        const titleStyle = {
+        const styles = defineExcelStyles();
+        
+        // Set column structure
+        setExcelColumns(worksheet);
+        
+        // Add header and info sections
+        addExcelHeader(worksheet, startDate, endDate, customerId, styles);
+        
+        // Calculate and add summary data
+        const totalSalesAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
+        const totalItemsSold = sales.reduce((sum, sale) => 
+            sum + sale.products.reduce((prodSum, prod) => prodSum + prod.quantity, 0), 0);
+        addExcelSummary(worksheet, sales.length, totalItemsSold, totalSalesAmount);
+        
+        // Add sales data
+        const tableStartRow = 13;
+        const rowNumber = addExcelSalesData(worksheet, sales, tableStartRow, styles);
+        
+        // Format columns
+        formatExcelColumns(worksheet);
+        
+        // Add totals row
+        addExcelTotalsRow(worksheet, rowNumber, totalSalesAmount, styles.totalStyle);
+        
+        // Add footer
+        addExcelFooter(worksheet, rowNumber);
+        
+        // Set response headers and send workbook
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=ventas-informe-${Date.now()}.xlsx`);
+        await workbook.xlsx.write(res);
+        res.end();
+        
+    } catch (error) {
+        console.error("Error generating sales Excel report:", error);
+        res.status(500).json({ message: "Error generating Excel report" });
+    }
+};
+
+// ==== Helper Functions ====
+
+// Shared function to fetch sales with filters
+async function fetchFilteredSales(startDate, endDate, customerId) {
+    // Build query object based on filters
+    let query = {};
+    
+    // Add date range filter
+    if (startDate || endDate) {
+        query.salesDate = {};
+        if (startDate) query.salesDate.$gte = new Date(startDate);
+        if (endDate) query.salesDate.$lte = new Date(endDate);
+    }
+    
+    // Add customer filter
+    if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+        query.customer = customerId;
+    }
+    
+    // Fetch and return sales
+    return await Sale.find(query)
+        .sort({ salesDate: -1 })
+        .populate("customer", "name")
+        .populate("products.product", "name");
+}
+
+// ==== PDF Helper Functions ====
+
+function addPDFHeader(doc, companyName, now, styles) {
+    // Header background
+    doc.rect(50, 50, doc.page.width - 100, 80)
+       .fillAndStroke(styles.primary, styles.primary);
+    
+    // Company name and report title
+    doc.fillColor(styles.headerText)
+       .font('Helvetica-Bold')
+       .fontSize(24)
+       .text(companyName, 70, 70)
+       .fontSize(16)
+       .text('Informe de Ventas', 70, 100);
+    
+    // Date generated
+    doc.font('Helvetica')
+       .fontSize(10)
+       .text(`Generado: ${now.toLocaleDateString('es-CO')} ${now.toLocaleTimeString('es-CO')}`, 
+             70, 120, { align: 'left' });
+}
+
+function addPDFReportInfo(doc, startDate, endDate, customerId, styles) {
+    // Info section background
+    doc.rect(50, 150, doc.page.width - 100, 70)
+       .fillAndStroke(styles.secondary, styles.border);
+    
+    // Section title   
+    doc.fillColor(styles.text)
+       .fontSize(12)
+       .font('Helvetica-Bold')
+       .text('Parámetros del Informe:', 70, 160);
+    
+    // Info content
+    doc.font('Helvetica').fontSize(10);
+    let infoY = 180;
+    
+    // Date range
+    doc.text(`Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`, 70, infoY);
+    infoY += 15;
+    
+    // Customer info
+    if (customerId) {
+        Customer.findById(customerId).then(customer => {
+            if (customer) doc.text(`Cliente: ${customer.name}`, 70, infoY);
+        });
+    } else {
+        doc.text('Cliente: Todos', 70, infoY);
+    }
+}
+
+function addPDFSummary(doc, salesCount, totalAmount, styles) {
+    // Summary section background
+    doc.rect(50, 240, doc.page.width - 100, 60)
+       .fillAndStroke('#e6f7ff', styles.border);
+    
+    // Summary title
+    doc.fillColor(styles.text)
+       .fontSize(14)
+       .font('Helvetica-Bold')
+       .text('Resumen', 70, 250);
+    
+    // Summary content
+    doc.font('Helvetica').fontSize(10)
+       .text(`Total de Ventas: ${salesCount}`, 70, 270)
+       .text(`Total: ${new Intl.NumberFormat('es-CO', { 
+           style: 'currency', currency: 'COP', minimumFractionDigits: 0 
+       }).format(totalAmount)}`, 70, 285);
+}
+
+function addPDFSalesTable(doc, sales, styles, formatCOP) {
+    const tableTop = 320;
+    const tableHeaders = ['ID', 'Fecha', 'Cliente', 'Producto', 'Cantidad', 'Total'];
+    const colWidths = [60, 70, 90, 120, 60, 90];
+    
+    // Draw table header
+    doc.rect(50, tableTop, doc.page.width - 100, 20)
+       .fillAndStroke(styles.primary, styles.primary);
+    
+    // Add header text
+    let currentX = 50;
+    tableHeaders.forEach((header, i) => {
+        doc.font('Helvetica-Bold')
+           .fontSize(10)
+           .fillColor(styles.headerText)
+           .text(header, currentX + 5, tableTop + 6, 
+                { width: colWidths[i], align: i === 5 ? 'right' : 'left' });
+        currentX += colWidths[i];
+    });
+    
+    // Draw table rows
+    let y = tableTop + 20;
+    
+    for (let i = 0; i < sales.length; i++) {
+        const sale = sales[i];
+        
+        for (let j = 0; j < sale.products.length; j++) {
+            const product = sale.products[j];
+            
+            // Add new page if necessary
+            if (y > 700) {
+                doc.addPage();
+                y = 50;
+                
+                // Redraw header on new page
+                currentX = 50;
+                doc.rect(50, y, doc.page.width - 100, 20)
+                   .fillAndStroke(styles.primary, styles.primary);
+                   
+                tableHeaders.forEach((header, i) => {
+                    doc.font('Helvetica-Bold')
+                       .fontSize(10)
+                       .fillColor(styles.headerText)
+                       .text(header, currentX + 5, y + 6, 
+                            { width: colWidths[i], align: i === 5 ? 'right' : 'left' });
+                    currentX += colWidths[i];
+                });
+                
+                y += 20;
+            }
+            
+            // Row background (alternating)
+            doc.rect(50, y, doc.page.width - 100, 20)
+               .fillAndStroke((i + j) % 2 === 0 ? '#f9f9f9' : '#ffffff', styles.border);
+            
+            // Row data
+            doc.font('Helvetica').fontSize(9).fillColor(styles.text);
+            
+            currentX = 50;
+            
+            // Add cell data
+            doc.text(sale.id, currentX + 5, y + 6, { width: colWidths[0] });
+            currentX += colWidths[0];
+            
+            doc.text(new Date(sale.salesDate).toLocaleDateString('es-CO'), currentX + 5, y + 6, { width: colWidths[1] });
+            currentX += colWidths[1];
+            
+            doc.text(sale.customer ? sale.customer.name : 'Desconocido', currentX + 5, y + 6, { width: colWidths[2] });
+            currentX += colWidths[2];
+            
+            doc.text(product.product ? product.product.name : 'Desconocido', currentX + 5, y + 6, { width: colWidths[3] });
+            currentX += colWidths[3];
+            
+            doc.text(product.quantity.toString(), currentX + 5, y + 6, { width: colWidths[4], align: 'center' });
+            currentX += colWidths[4];
+            
+            doc.text(formatCOP(product.total), currentX + 5, y + 6, { width: colWidths[5], align: 'right' });
+            
+            y += 20;
+        }
+    }
+}
+
+function addPDFFooter(doc, companyName, styles) {
+    const pageCount = doc.bufferedPageRange().count;
+    
+    for (let i = 0; i < pageCount; i++) {
+        doc.switchToPage(i);
+        
+        // Page number
+        doc.font('Helvetica').fontSize(8).fillColor('#999999')
+           .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50,
+                 { align: 'center', width: doc.page.width - 100 });
+        
+        // Footer line
+        doc.moveTo(50, doc.page.height - 60)
+           .lineTo(doc.page.width - 50, doc.page.height - 60)
+           .stroke(styles.border);
+        
+        // Company footer
+        doc.font('Helvetica').fontSize(8).fillColor('#666666')
+           .text(`${companyName} - Sistema de Gestión de Ventas`, 50, doc.page.height - 40,
+                 { align: 'center', width: doc.page.width - 100 });
+    }
+}
+
+// ==== Excel Helper Functions ====
+
+function defineExcelStyles() {
+    return {
+        titleStyle: {
             font: { bold: true, size: 16, color: { argb: 'FFFFFFFF' } },
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF336699' } },
             alignment: { horizontal: 'center', vertical: 'middle' }
-        };
-        
-        const subtitleStyle = {
+        },
+        subtitleStyle: {
             font: { bold: true, size: 12, color: { argb: 'FF333333' } },
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } },
             alignment: { horizontal: 'left', vertical: 'middle' },
@@ -703,9 +703,8 @@ export const exportSalesExcel = async (req, res) => {
                 bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
                 right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
             }
-        };
-        
-        const headerStyle = {
+        },
+        headerStyle: {
             font: { bold: true, size: 11, color: { argb: 'FFFFFFFF' } },
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF336699' } },
             alignment: { horizontal: 'center', vertical: 'middle' },
@@ -715,17 +714,14 @@ export const exportSalesExcel = async (req, res) => {
                 bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
                 right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
             }
-        };
-        
-        const rowEvenStyle = {
+        },
+        rowEvenStyle: {
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
-        };
-        
-        const rowOddStyle = {
+        },
+        rowOddStyle: {
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } }
-        };
-        
-        const totalStyle = {
+        },
+        totalStyle: {
             font: { bold: true, size: 11 },
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } },
             alignment: { horizontal: 'right', vertical: 'middle' },
@@ -735,238 +731,172 @@ export const exportSalesExcel = async (req, res) => {
                 bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
                 right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
             }
-        };
-        
-        // Set column widths
-        worksheet.columns = [
-            { header: 'ID Venta', key: 'id', width: 15 },
-            { header: 'Fecha', key: 'date', width: 15 },
-            { header: 'Cliente', key: 'customer', width: 25 },
-            { header: 'Producto', key: 'product', width: 30 },
-            { header: 'Cantidad', key: 'quantity', width: 10 },
-            { header: 'Precio', key: 'price', width: 15 },
-            { header: 'Total Producto', key: 'productTotal', width: 15 },
-            { header: 'Total Venta', key: 'total', width: 15 }
-        ];
-        
-        // Get current time
-        const now = new Date();
-        const formattedDateTime = now.toLocaleString('es-CO');
-        
-        // Add title
-        worksheet.mergeCells('A1:H2');
-        const titleCell = worksheet.getCell('A1');
-        titleCell.value = 'Informe de Ventas - IceSoft';
-        titleCell.style = titleStyle;
-        worksheet.getRow(1).height = 30;
-        
-        // Add report information
-        worksheet.mergeCells('A3:H3');
-        const infoCell = worksheet.getCell('A3');
-        infoCell.value = `Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`;
-        infoCell.style = {
-            font: { size: 10 },
-            alignment: { horizontal: 'left', vertical: 'middle' }
-        };
-        
-        if (customerId) {
-            const customer = await Customer.findById(customerId);
-            worksheet.mergeCells('A4:H4');
-            const customerCell = worksheet.getCell('A4');
-            customerCell.value = `Cliente: ${customer ? customer.name : 'No encontrado'}`;
-            customerCell.style = {
-                font: { size: 10 },
-                alignment: { horizontal: 'left', vertical: 'middle' }
-            };
-        } else {
-            worksheet.mergeCells('A4:H4');
-            const customerCell = worksheet.getCell('A4');
-            customerCell.value = 'Cliente: Todos';
-            customerCell.style = {
-                font: { size: 10 },
-                alignment: { horizontal: 'left', vertical: 'middle' }
-            };
         }
-        
-        // Add generation date
-        worksheet.mergeCells('A5:H5');
-        const dateCell = worksheet.getCell('A5');
-        dateCell.value = `Generado: ${formattedDateTime}`;
-        dateCell.style = {
-            font: { size: 10, italic: true },
-            alignment: { horizontal: 'left', vertical: 'middle' }
-        };
-        
-        // Calculate summary data
-        const totalSalesAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
-        const totalItemsSold = sales.reduce((sum, sale) => {
-            return sum + sale.products.reduce((prodSum, prod) => prodSum + prod.quantity, 0);
-        }, 0);
-        
-        // Add summary section
-        worksheet.mergeCells('A7:H7');
-        const summaryTitle = worksheet.getCell('A7');
-        summaryTitle.value = 'Resumen';
-        summaryTitle.style = subtitleStyle;
-        
-        worksheet.mergeCells('A8:G8');
-        worksheet.getCell('A8').value = 'Total de Ventas:';
-        worksheet.getCell('A8').style = {
-            font: { bold: true },
-            alignment: { horizontal: 'right' }
-        };
-        worksheet.getCell('H8').value = sales.length;
-        
-        worksheet.mergeCells('A9:G9');
-        worksheet.getCell('A9').value = 'Artículos Vendidos:';
-        worksheet.getCell('A9').style = {
-            font: { bold: true },
-            alignment: { horizontal: 'right' }
-        };
-        worksheet.getCell('H9').value = totalItemsSold;
-        
-        worksheet.mergeCells('A10:G10');
-        worksheet.getCell('A10').value = 'Total:';
-        worksheet.getCell('A10').style = {
-            font: { bold: true },
-            alignment: { horizontal: 'right' }
-        };
-        worksheet.getCell('H10').value = totalSalesAmount;
-        // Formato de moneda colombiana
-        worksheet.getCell('H10').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-        
-        // Add space before table
-        const tableStartRow = 13;
-        
-        // Style headers row
-        const headerRow = worksheet.getRow(tableStartRow);
-        headerRow.height = 20;
-        headerRow.eachCell((cell) => {
-            cell.style = headerStyle;
+    };
+}
+
+function setExcelColumns(worksheet) {
+    worksheet.columns = [
+        { header: 'ID Venta', key: 'id', width: 15 },
+        { header: 'Fecha', key: 'date', width: 15 },
+        { header: 'Cliente', key: 'customer', width: 25 },
+        { header: 'Producto', key: 'product', width: 30 },
+        { header: 'Cantidad', key: 'quantity', width: 10 },
+        { header: 'Precio', key: 'price', width: 15 },
+        { header: 'Total Producto', key: 'productTotal', width: 15 },
+        { header: 'Total Venta', key: 'total', width: 15 }
+    ];
+}
+
+function addExcelHeader(worksheet, startDate, endDate, customerId, styles) {
+    // Add title
+    worksheet.mergeCells('A1:H2');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = 'Informe de Ventas - IceSoft';
+    titleCell.style = styles.titleStyle;
+    worksheet.getRow(1).height = 30;
+    
+    // Add report dates
+    worksheet.mergeCells('A3:H3');
+    const infoCell = worksheet.getCell('A3');
+    infoCell.value = `Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`;
+    infoCell.style = { font: { size: 10 }, alignment: { horizontal: 'left', vertical: 'middle' } };
+    
+    // Add customer info
+    worksheet.mergeCells('A4:H4');
+    const customerCell = worksheet.getCell('A4');
+    if (customerId) {
+        Customer.findById(customerId).then(customer => {
+            customerCell.value = `Cliente: ${customer ? customer.name : 'No encontrado'}`;
         });
-        
-        // Prepare data rows for flattened structure (one product per row)
-        let tableData = [];
-        sales.forEach(sale => {
-            sale.products.forEach(product => {
-                tableData.push({
-                    id: sale._id,
-                    date: new Date(sale.salesDate),
-                    customer: sale.customer ? sale.customer.name : 'Desconocido',
-                    product: product.product ? product.product.name : 'Desconocido',
-                    quantity: product.quantity,
-                    price: product.price,
-                    productTotal: product.quantity * product.price,
-                    total: sale.total
-                });
-            });
-        });
-        
-        // Add data rows
-        let rowNumber = tableStartRow + 1;
-        tableData.forEach((row, index) => {
-            const excelRow = worksheet.addRow({
-                id: row.id,
-                date: row.date,
-                customer: row.customer,
-                product: row.product,
-                quantity: row.quantity,
-                price: row.price,
-                productTotal: row.productTotal,
-                total: row.total
-            });
-            
-            // Apply alternating row styles
-            const rowStyle = index % 2 === 0 ? rowEvenStyle : rowOddStyle;
-            excelRow.eachCell((cell) => {
-                cell.style = { 
-                    ...cell.style,
-                    ...rowStyle,
-                    border: {
-                        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                    }
-                };
-            });
-            
-            rowNumber++;
-        });
-        
-        // Format date column
-        worksheet.getColumn('date').numFmt = 'dd/mm/yyyy';
-        
-        // Format currency columns
-        worksheet.getColumn('price').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-        worksheet.getColumn('price').alignment = { horizontal: 'right' };
-        
-        worksheet.getColumn('productTotal').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-        worksheet.getColumn('productTotal').alignment = { horizontal: 'right' };
-        
-        worksheet.getColumn('total').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-        worksheet.getColumn('total').alignment = { horizontal: 'right' };
-        
-        // Add totals row
-        const totalsRow = worksheet.addRow(['Total', '', '', '', '', '', '', totalSalesAmount]);
-        totalsRow.eachCell((cell) => {
-            cell.style = totalStyle;
-        });
-        worksheet.getCell(`H${rowNumber}`).numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-        
-        // Create table with proper structure
-        const tableName = 'SalesTable';
-        worksheet.addTable({
-            name: tableName,
-            ref: `A${tableStartRow}`,
-            headerRow: true,
-            totalsRow: false,
-            style: {
-                theme: 'TableStyleMedium2',
-                showRowStripes: true,
-            },
-            columns: [
-                { name: 'ID Venta' },
-                { name: 'Fecha' },
-                { name: 'Cliente' },
-                { name: 'Producto' },
-                { name: 'Cantidad' },
-                { name: 'Precio' },
-                { name: 'Total Producto' },
-                { name: 'Total Venta' }
-            ],
-            rows: tableData.map(row => [
-                row.id,
-                row.date,
-                row.customer,
-                row.product,
-                row.quantity,
-                row.price,
-                row.productTotal,
-                row.total
-            ])
-        });
-        
-        // Add footer
-        const footerRow = rowNumber + 2;
-        worksheet.mergeCells(`A${footerRow}:H${footerRow}`);
-        const footerCell = worksheet.getCell(`A${footerRow}`);
-        footerCell.value = 'IceSoft - Sistema de Gestión de Ventas';
-        footerCell.style = {
-            font: { size: 8, italic: true, color: { argb: 'FF666666' } },
-            alignment: { horizontal: 'center' }
-        };
-        
-        // Set the content type and disposition
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=ventas-informe-${Date.now()}.xlsx`);
-        
-        // Write the workbook to the response
-        await workbook.xlsx.write(res);
-        res.end();
-        
-    } catch (error) {
-        console.error("Error generating sales Excel report:", error);
-        res.status(500).json({ message: "Error generating Excel report" });
+    } else {
+        customerCell.value = 'Cliente: Todos';
     }
-};
+    customerCell.style = { font: { size: 10 }, alignment: { horizontal: 'left', vertical: 'middle' } };
+    
+    // Add generation date
+    worksheet.mergeCells('A5:H5');
+    const dateCell = worksheet.getCell('A5');
+    dateCell.value = `Generado: ${new Date().toLocaleString('es-CO')}`;
+    dateCell.style = { font: { size: 10, italic: true }, alignment: { horizontal: 'left', vertical: 'middle' } };
+}
+
+function addExcelSummary(worksheet, salesCount, itemsCount, totalAmount) {
+    // Add summary title
+    worksheet.mergeCells('A7:H7');
+    const summaryTitle = worksheet.getCell('A7');
+    summaryTitle.value = 'Resumen';
+    summaryTitle.style = {
+        font: { bold: true, size: 12 },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } },
+        alignment: { horizontal: 'left', vertical: 'middle' }
+    };
+    
+    // Add summary data
+    worksheet.mergeCells('A8:G8');
+    worksheet.getCell('A8').value = 'Total de Ventas:';
+    worksheet.getCell('A8').style = { font: { bold: true }, alignment: { horizontal: 'right' } };
+    worksheet.getCell('H8').value = salesCount;
+    
+    worksheet.mergeCells('A9:G9');
+    worksheet.getCell('A9').value = 'Artículos Vendidos:';
+    worksheet.getCell('A9').style = { font: { bold: true }, alignment: { horizontal: 'right' } };
+    worksheet.getCell('H9').value = itemsCount;
+    
+    worksheet.mergeCells('A10:G10');
+    worksheet.getCell('A10').value = 'Total:';
+    worksheet.getCell('A10').style = { font: { bold: true }, alignment: { horizontal: 'right' } };
+    worksheet.getCell('H10').value = totalAmount;
+    worksheet.getCell('H10').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
+}
+
+function addExcelSalesData(worksheet, sales, tableStartRow, styles) {
+    // Style headers row
+    const headerRow = worksheet.getRow(tableStartRow);
+    headerRow.height = 20;
+    headerRow.eachCell(cell => { cell.style = styles.headerStyle; });
+    
+    // Flatten sales data (one product per row)
+    let tableData = [];
+    sales.forEach(sale => {
+        sale.products.forEach(product => {
+            tableData.push({
+                id: sale._id,
+                date: new Date(sale.salesDate),
+                customer: sale.customer ? sale.customer.name : 'Desconocido',
+                product: product.product ? product.product.name : 'Desconocido',
+                quantity: product.quantity,
+                price: product.price,
+                productTotal: product.quantity * product.price,
+                total: sale.total
+            });
+        });
+    });
+    
+    // Add data rows
+    let rowNumber = tableStartRow + 1;
+    tableData.forEach((row, index) => {
+        const excelRow = worksheet.addRow({
+            id: row.id,
+            date: row.date,
+            customer: row.customer,
+            product: row.product,
+            quantity: row.quantity,
+            price: row.price,
+            productTotal: row.productTotal,
+            total: row.total
+        });
+        
+        // Apply alternating row styles
+        const rowStyle = index % 2 === 0 ? styles.rowEvenStyle : styles.rowOddStyle;
+        excelRow.eachCell(cell => {
+            cell.style = { 
+                ...cell.style,
+                ...rowStyle,
+                border: {
+                    top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+                    left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+                    bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+                    right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
+                }
+            };
+        });
+        
+        rowNumber++;
+    });
+    
+    return rowNumber;
+}
+
+function formatExcelColumns(worksheet) {
+    // Format date column
+    worksheet.getColumn('date').numFmt = 'dd/mm/yyyy';
+    
+    // Format currency columns
+    const currencyFormat = '"$"#,##0_-;[Red]-"$"#,##0_-';
+    worksheet.getColumn('price').numFmt = currencyFormat;
+    worksheet.getColumn('price').alignment = { horizontal: 'right' };
+    
+    worksheet.getColumn('productTotal').numFmt = currencyFormat;
+    worksheet.getColumn('productTotal').alignment = { horizontal: 'right' };
+    
+    worksheet.getColumn('total').numFmt = currencyFormat;
+    worksheet.getColumn('total').alignment = { horizontal: 'right' };
+}
+
+function addExcelTotalsRow(worksheet, rowNumber, totalAmount, totalStyle) {
+    const totalsRow = worksheet.addRow(['Total', '', '', '', '', '', '', totalAmount]);
+    totalsRow.eachCell(cell => { cell.style = totalStyle; });
+    worksheet.getCell(`H${rowNumber}`).numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
+}
+
+function addExcelFooter(worksheet, rowNumber) {
+    const footerRow = rowNumber + 2;
+    worksheet.mergeCells(`A${footerRow}:H${footerRow}`);
+    const footerCell = worksheet.getCell(`A${footerRow}`);
+    footerCell.value = 'IceSoft - Sistema de Gestión de Ventas';
+    footerCell.style = {
+        font: { size: 8, italic: true, color: { argb: 'FF666666' } },
+        alignment: { horizontal: 'center' }
+    };
+}
