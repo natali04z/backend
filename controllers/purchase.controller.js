@@ -2,8 +2,7 @@ import mongoose from "mongoose";
 import Purchase from "../models/purchase.js";
 import Product from "../models/product.js";
 import { checkPermission } from "../utils/permissions.js";
-import PDFDocument from "pdfkit";
-import ExcelJS from "exceljs";
+import { generatePdfReport, generateExcelReport } from "../utils/report-exporters.js";
 
 // Function to generate purchase ID
 async function generatePurchaseId() {
@@ -53,6 +52,11 @@ function validatePurchaseData(data, isUpdate = false) {
     // Validate string fields
     if (data.details !== undefined && (typeof data.details !== "string" || data.details.trim() === "")) {
         errors.push("Details must be a non-empty string");
+    }
+    
+    // Validate status if provided
+    if (data.status !== undefined && !["active", "inactive"].includes(data.status)) {
+        errors.push("Status must be either 'active' or 'inactive'");
     }
     
     return errors;
@@ -155,7 +159,12 @@ export const postPurchase = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { products, details, purchaseDate } = req.body;
+        const { products, details, purchaseDate, status = "active" } = req.body;
+
+        // Validate status
+        if (!["active", "inactive"].includes(status)) {
+            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
+        }
 
         // Validate if products array exists and is not empty
         if (!Array.isArray(products) || products.length === 0) {
@@ -179,6 +188,11 @@ export const postPurchase = async (req, res) => {
             const foundProduct = await Product.findById(item.product);
             if (!foundProduct) {
                 return res.status(404).json({ message: `Product not found at index ${i}` });
+            }
+
+            // Verificar si el producto está activo
+            if (foundProduct.status !== "active") {
+                return res.status(400).json({ message: `Cannot use inactive product at index ${i}` });
             }
 
             // Validate quantity
@@ -211,7 +225,8 @@ export const postPurchase = async (req, res) => {
             products: validatedProducts,
             details: details || "Purchase details not provided",
             purchaseDate: purchaseDate || new Date(),
-            total
+            total,
+            status
         });
 
         // Save to database
@@ -236,12 +251,12 @@ export const postPurchase = async (req, res) => {
 // PUT: Update an existing purchase
 export const updatePurchase = async (req, res) => {
     try {
-        if (!checkPermission(req.user.role, "edit_purchases")) {
+        if (!checkPermission(req.user.role, "update_purchases")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
         const { id } = req.params;
-        const { product, purchaseDate, total, details } = req.body;
+        const { product, purchaseDate, total, details, status } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid purchase ID format" });
@@ -261,6 +276,12 @@ export const updatePurchase = async (req, res) => {
             if (!existingProduct) {
                 return res.status(404).json({ message: "Product not found" });
             }
+            
+            // Verificar si el producto está activo
+            if (existingProduct.status !== "active") {
+                return res.status(400).json({ message: "Cannot use inactive product" });
+            }
+            
             updateFields.product = product;
         }
 
@@ -268,6 +289,7 @@ export const updatePurchase = async (req, res) => {
         if (purchaseDate !== undefined) updateFields.purchaseDate = purchaseDate;
         if (total !== undefined) updateFields.total = total;
         if (details !== undefined) updateFields.details = details;
+        if (status !== undefined) updateFields.status = status;
         
         // Check if there are fields to update
         if (Object.keys(updateFields).length === 0) {
@@ -278,7 +300,7 @@ export const updatePurchase = async (req, res) => {
             new: true,
             runValidators: true
         })
-            .select("id product purchaseDate total details")
+            .select("id product purchaseDate total details status")
             .populate("product", "name");
 
         if (!updatedPurchase) {
@@ -302,6 +324,52 @@ export const updatePurchase = async (req, res) => {
         }
         
         res.status(500).json({ message: "Server error" });
+    }
+};
+
+// Update purchase status
+export const updatePurchaseStatus = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "update_status_purchases")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid purchase ID format" });
+        }
+
+        if (!status || !["active", "inactive"].includes(status)) {
+            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
+        }
+
+        const updatedPurchase = await Purchase.findByIdAndUpdate(
+            id,
+            { status },
+            { new: true, runValidators: true }
+        )
+            .select("id product purchaseDate total details status")
+            .populate("product", "name");
+
+        if (!updatedPurchase) {
+            return res.status(404).json({ message: "Purchase not found" });
+        }
+
+        // Format the date in the response
+        const formattedPurchase = updatedPurchase.toObject();
+        if (formattedPurchase.purchaseDate) {
+            formattedPurchase.purchaseDate = new Date(formattedPurchase.purchaseDate).toISOString().split('T')[0];
+        }
+
+        res.status(200).json({ 
+            message: `Purchase ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
+            purchase: formattedPurchase 
+        });
+    } catch (error) {
+        console.error("Error updating purchase status:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -331,23 +399,22 @@ export const deletePurchase = async (req, res) => {
     }
 };
 
-// ===== EXPORT FUNCTIONS =====
-
-// GET: Generate a PDF report of purchases
-export const generatePdfReport = async (req, res) => {
+// Exportar compras a PDF
+export const exportPurchaseToPdf = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_purchases")) {
-            return res.status(403).json({ message: "No tiene permisos para generar informes" });
+            return res.status(403).json({ message: "You don't have permission to generate reports" });
         }
 
-        const { startDate, endDate, productId } = req.query;
+        const { startDate, endDate, productId, status } = req.query;
         
         if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
             return res.status(400).json({ 
-                message: "La fecha de inicio no puede ser posterior a la fecha de fin" 
+                message: "Start date cannot be later than end date" 
             });
         }
         
+        // Build query
         let query = {};
         
         if (startDate || endDate) {
@@ -359,8 +426,13 @@ export const generatePdfReport = async (req, res) => {
         if (productId && mongoose.Types.ObjectId.isValid(productId)) {
             query.product = productId;
         }
+        
+        // Agregar filtro de estado si se proporciona
+        if (status && ["active", "inactive"].includes(status)) {
+            query.status = status;
+        }
 
-        console.log("Ejecutando consulta con filtros:", JSON.stringify(query));
+        // Get data
         const purchases = await Purchase.find(query)
             .sort({ purchaseDate: -1 })
             .populate("product", "name price")
@@ -368,7 +440,7 @@ export const generatePdfReport = async (req, res) => {
             
         if (purchases.length === 0) {
             return res.status(404).json({ 
-                message: "No se encontraron compras con los criterios especificados" 
+                message: "No purchases found with the specified criteria" 
             });
         }
 
@@ -379,310 +451,116 @@ export const generatePdfReport = async (req, res) => {
             productInfo = await Product.findById(productId).lean();
         }
 
-        const doc = new PDFDocument({
-            margin: 50,
-            size: 'A4',
-            bufferPages: true,
-            info: {
-                Title: 'Informe de Compras',
-                Author: companyName,
-                Subject: 'Informe de Compras',
-                Keywords: 'compras, informe, pdf',
-                Creator: 'IceSoft System',
-                Producer: 'PDFKit'
-            }
-        });
-        
-        const formatCOP = (amount) => {
-            return new Intl.NumberFormat('es-CO', { 
-                style: 'currency', 
-                currency: 'COP',
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0
-            }).format(amount);
-        };
-  
+        // Configure headers for PDF download
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=informe-compras-${Date.now()}.pdf`);
+        res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.pdf`);
 
-        let pdfError = null;
+        // Prepare options for the PDF report
+        const reportOptions = {
+            data: purchases,
+            title: "Purchase Report",
+            companyName: companyName,
+            filters: {
+                startDate,
+                endDate,
+                product: productInfo ? productInfo.name : "All",
+                status: status || "All"
+            },
+            columns: [
+                { header: "ID", key: "id", width: 80 },
+                { header: "Date", key: "purchaseDate", width: 100, type: "date" },
+                { header: "Product", key: "productName", width: 200 },
+                { header: "Total", key: "total", width: 120, align: "right", type: "currency" },
+                { header: "Status", key: "status", width: 80 }
+            ],
+            formatData: (purchase) => {
+                // Format each row data
+                return {
+                    id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
+                    purchaseDate: purchase.purchaseDate ? new Date(purchase.purchaseDate) : null,
+                    productName: purchase.product?.name || "Unknown",
+                    total: purchase.total || 0,
+                    status: purchase.status || "N/A"
+                };
+            },
+            calculateSummary: (data) => {
+                // Calculate summary information
+                const totalAmount = data.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
+                return {
+                    count: data.length,
+                    totalAmount
+                };
+            },
+            filename: `purchases-report-${Date.now()}.pdf`
+        };
         
-        doc.on('error', (err) => {
-            pdfError = err;
-            console.error("Error en la generación del PDF:", err);
-        });
-
-        const chunks = [];
-        const bufferStream = new require('stream').Writable({
-            write(chunk, encoding, callback) {
-                chunks.push(chunk);
-                callback();
-            }
-        });
-        
-        doc.pipe(res);
-        doc.pipe(bufferStream);
-
         try {
-            const styles = {
-                primary: '#336699',
-                secondary: '#f5f5f5',
-                textColor: '#333333',
-                headerTextColor: '#ffffff',
-                borderColor: '#cccccc'
-            };
+            await generatePdfReport(reportOptions, res);
+        } catch (pdfError) {
+            console.error("Error generating PDF:", pdfError);
             
-            const now = new Date();
- 
-            doc.rect(50, 50, doc.page.width - 100, 80)
-               .fillAndStroke(styles.primary, styles.primary);
-            
-            doc.fillColor(styles.headerTextColor)
-               .font('Helvetica-Bold')
-               .fontSize(24)
-               .text(companyName, 70, 70)
-               .fontSize(16)
-               .text('Informe de Compras', 70, 100);
-            
-            doc.font('Helvetica')
-               .fontSize(10)
-               .text(`Generado: ${now.toLocaleDateString('es-CO')} ${now.toLocaleTimeString('es-CO')}`, 
-                     70, 120, { align: 'left' });
-            
-            // 9.2 Sección de parámetros
-            doc.rect(50, 150, doc.page.width - 100, 70)
-               .fillAndStroke(styles.secondary, styles.borderColor);
-            
-            doc.fillColor(styles.textColor)
-               .fontSize(12)
-               .font('Helvetica-Bold')
-               .text('Parámetros del Informe:', 70, 160);
-            
-            doc.font('Helvetica').fontSize(10);
-            let infoY = 180;
-            
-            // Fechas
-            doc.text(`Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`, 70, infoY);
-            infoY += 15;
-            
-            // Producto
-            if (productInfo) {
-                doc.text(`Producto: ${productInfo.name}`, 70, infoY);
-            } else {
-                doc.text('Producto: Todos', 70, infoY);
-            }
-            
-            // 9.3 Sección de resumen
-            const totalAmount = purchases.reduce((sum, purchase) => sum + purchase.total, 0);
-            
-            doc.rect(50, 240, doc.page.width - 100, 60)
-               .fillAndStroke('#e6f7ff', styles.borderColor);
-            
-            doc.fillColor(styles.textColor)
-               .fontSize(14)
-               .font('Helvetica-Bold')
-               .text('Resumen', 70, 250);
-            
-            doc.font('Helvetica').fontSize(10)
-               .text(`Total de Compras: ${purchases.length}`, 70, 270)
-               .text(`Total: ${formatCOP(totalAmount)}`, 70, 285);
-            
-            // 9.4 Tabla de compras
-            const tableTop = 320;
-            const tableHeaders = ['ID', 'Fecha', 'Producto', 'Total'];
-            const colWidths = [80, 100, 200, 120];
-            
-            // Dibujar encabezado de tabla
-            doc.rect(50, tableTop, doc.page.width - 100, 20)
-               .fillAndStroke(styles.primary, styles.primary);
-            
-            let currentX = 50;
-            tableHeaders.forEach((header, i) => {
-                doc.font('Helvetica-Bold')
-                   .fontSize(10)
-                   .fillColor(styles.headerTextColor)
-                   .text(header, currentX + 5, tableTop + 6, 
-                        { width: colWidths[i], align: i === 3 ? 'right' : 'left' });
-                currentX += colWidths[i];
-            });
-            
-            // Dibujar filas de la tabla
-            let y = tableTop + 20;
-            
-            for (let i = 0; i < purchases.length; i++) {
-                const purchase = purchases[i];
-                
-                // Nueva página si es necesario
-                if (y > 700) {
-                    doc.addPage();
-                    y = 50;
-                    
-                    // Dibujar encabezado en la nueva página
-                    currentX = 50;
-                    doc.rect(50, y, doc.page.width - 100, 20)
-                       .fillAndStroke(styles.primary, styles.primary);
-                       
-                    tableHeaders.forEach((header, i) => {
-                        doc.font('Helvetica-Bold')
-                           .fontSize(10)
-                           .fillColor(styles.headerTextColor)
-                           .text(header, currentX + 5, y + 6, 
-                                { width: colWidths[i], align: i === 3 ? 'right' : 'left' });
-                        currentX += colWidths[i];
-                    });
-                    
-                    y += 20;
-                }
-                
-                // Color de fondo alternado
-                doc.rect(50, y, doc.page.width - 100, 20)
-                   .fillAndStroke(i % 2 === 0 ? '#f9f9f9' : '#ffffff', styles.borderColor);
-                
-                // Datos de la fila
-                doc.font('Helvetica').fontSize(9).fillColor(styles.textColor);
-                
-                currentX = 50;
-                
-                // ID
-                doc.text(purchase.id || purchase._id?.toString().substring(0, 8) || "N/A", 
-                         currentX + 5, y + 6, { width: colWidths[0] });
-                currentX += colWidths[0];
-                
-                // Fecha
-                const formattedDate = purchase.purchaseDate ? 
-                    new Date(purchase.purchaseDate).toLocaleDateString('es-CO') : "N/A";
-                doc.text(formattedDate, currentX + 5, y + 6, { width: colWidths[1] });
-                currentX += colWidths[1];
-                
-                // Producto
-                let productName = "Desconocido";
-                if (purchase.product) {
-                    if (typeof purchase.product === 'object' && purchase.product.name) {
-                        productName = purchase.product.name;
-                    } else if (purchase.productName) {
-                        productName = purchase.productName;
-                    }
-                }
-                doc.text(productName, currentX + 5, y + 6, { width: colWidths[2] });
-                currentX += colWidths[2];
-                
-                // Total
-                doc.text(formatCOP(purchase.total), currentX + 5, y + 6, 
-                         { width: colWidths[3], align: 'right' });
-                
-                y += 20;
-            }
-            
-            // 9.5 Pie de página
-            const addFooter = (doc) => {
-                const pageCount = doc.bufferedPageRange().count;
-                
-                for (let i = 0; i < pageCount; i++) {
-                    doc.switchToPage(i);
-                    
-                    // Número de página
-                    doc.font('Helvetica').fontSize(8).fillColor('#999999')
-                       .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50,
-                             { align: 'center', width: doc.page.width - 100 });
-                    
-                    // Línea del pie de página
-                    doc.moveTo(50, doc.page.height - 60)
-                       .lineTo(doc.page.width - 50, doc.page.height - 60)
-                       .stroke(styles.borderColor);
-                    
-                    // Texto del pie de página
-                    doc.font('Helvetica').fontSize(8).fillColor('#666666')
-                       .text(`${companyName} - Sistema de Gestión de Compras`, 50, doc.page.height - 40,
-                             { align: 'center', width: doc.page.width - 100 });
-                }
-            };
-            
-            // Añadir pie de página
-            addFooter(doc);
-            
-            // Finalizar PDF
-            doc.end();
-            
-            // Verificar si el PDF se generó correctamente
-            bufferStream.on('finish', () => {
-                const pdfBuffer = Buffer.concat(chunks);
-                
-                // Si el buffer es muy pequeño, puede ser un error
-                if (pdfBuffer.length < 1000) {
-                    console.warn("PDF generado es sospechosamente pequeño:", pdfBuffer.length, "bytes");
-                } else {
-                    console.log("PDF generado exitosamente:", pdfBuffer.length, "bytes");
-                }
-            });
-            
-        } catch (contentError) {
-            console.error("Error al generar el contenido del PDF:", contentError);
-            pdfError = contentError;
-            
-            // Intentar finalizar el documento si es posible
-            try {
-                doc.end();
-            } catch (e) {
-                console.error("Error al finalizar el documento PDF:", e);
+            if (!res.headersSent) {
+                return res.status(500).json({ 
+                    message: "Error generating PDF report", 
+                    error: pdfError.message 
+                });
             }
         }
         
     } catch (error) {
-        console.error("Error al generar informe PDF:", error);
+        console.error("Error generating PDF report:", error);
         
-        // Si la respuesta no ha sido enviada, enviar un error JSON
         if (!res.headersSent) {
             return res.status(500).json({ 
-                message: "Error al generar el informe PDF", 
+                message: "Error generating PDF report", 
                 error: error.message
             });
         }
     }
 };
 
-// GET: Generate Excel report of purchases
-// GET: Generate Excel report of purchases
-export const generateExcelReport = async (req, res) => {
+// Exportar compras a Excel
+export const exportPurchaseToExcel = async (req, res) => {
     try {
-        // 1. Validación de permisos
         if (!checkPermission(req.user.role, "view_purchases")) {
-            return res.status(403).json({ message: "No tiene permisos para generar informes" });
+            return res.status(403).json({ message: "You don't have permission to generate reports" });
         }
 
-        // 2. Extracción y validación de parámetros
-        const { startDate, endDate, productId } = req.query;
+        const { startDate, endDate, productId, status } = req.query;
         
         if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
             return res.status(400).json({ 
-                message: "La fecha de inicio no puede ser posterior a la fecha de fin" 
+                message: "Start date cannot be later than end date" 
             });
         }
         
-        // 3. Construcción de la consulta
+        // Build query
         let query = {};
         
-        // Filtro por fecha
         if (startDate || endDate) {
             query.purchaseDate = {};
             if (startDate) query.purchaseDate.$gte = new Date(startDate);
             if (endDate) query.purchaseDate.$lte = new Date(endDate);
         }
         
-        // Filtro por producto
         if (productId && mongoose.Types.ObjectId.isValid(productId)) {
             query.product = productId;
         }
         
-        // 4. Obtención de datos
-        console.log("Ejecutando consulta con filtros:", JSON.stringify(query));
+        // Agregar filtro de estado si se proporciona
+        if (status && ["active", "inactive"].includes(status)) {
+            query.status = status;
+        }
+
+        // Get data
         const purchases = await Purchase.find(query)
             .sort({ purchaseDate: -1 })
             .populate("product", "name price")
-            .lean(); // Usar lean() para mejorar rendimiento
+            .lean();
             
         if (purchases.length === 0) {
             return res.status(404).json({ 
-                message: "No se encontraron compras con los criterios especificados" 
+                message: "No purchases found with the specified criteria" 
             });
         }
 
@@ -692,442 +570,72 @@ export const generateExcelReport = async (req, res) => {
         if (productId && mongoose.Types.ObjectId.isValid(productId)) {
             productInfo = await Product.findById(productId).lean();
         }
+
+        // Configure headers for Excel download
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.xlsx`);
+
+        // Prepare options for the Excel report (using the same structure as PDF)
+        const reportOptions = {
+            data: purchases,
+            title: "Purchase Report",
+            companyName: companyName,
+            filters: {
+                startDate,
+                endDate,
+                product: productInfo ? productInfo.name : "All",
+                status: status || "All"
+            },
+            columns: [
+                { header: "ID", key: "id", width: 15 },
+                { header: "Date", key: "purchaseDate", width: 15, type: "date" },
+                { header: "Product", key: "productName", width: 30 },
+                { header: "Total", key: "total", width: 20, align: "right", type: "currency" },
+                { header: "Status", key: "status", width: 15 }
+            ],
+            formatData: (purchase) => {
+                // Format each row data
+                return {
+                    id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
+                    purchaseDate: purchase.purchaseDate ? new Date(purchase.purchaseDate) : null,
+                    productName: purchase.product?.name || "Unknown",
+                    total: purchase.total || 0,
+                    status: purchase.status || "N/A"
+                };
+            },
+            calculateSummary: (data) => {
+                // Calculate summary information
+                const totalAmount = data.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
+                return {
+                    count: data.length,
+                    totalAmount
+                };
+            },
+            filename: `purchases-report-${Date.now()}.xlsx`
+        };
         
         try {
-            const workbook = new ExcelJS.Workbook();
-            workbook.creator = 'IceSoft System';
-            workbook.created = new Date();
-            workbook.modified = new Date();
-            workbook.lastPrinted = new Date();
-            
-            const worksheet = workbook.addWorksheet('Informe de Compras', {
-                pageSetup: {
-                    paperSize: 9, // A4
-                    orientation: 'portrait',
-                    fitToPage: true,
-                    fitToWidth: 1,
-                    fitToHeight: 0,
-                    margins: {
-                        left: 0.7, right: 0.7,
-                        top: 0.75, bottom: 0.75,
-                        header: 0.3, footer: 0.3
-                    }
-                }
-            });
-            
-            // 8. Definición de estilos
-            const styles = {
-                titleStyle: {
-                    font: { bold: true, size: 16, color: { argb: 'FFFFFFFF' } },
-                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF336699' } },
-                    alignment: { horizontal: 'center', vertical: 'middle' }
-                },
-                subtitleStyle: {
-                    font: { bold: true, size: 12, color: { argb: 'FF333333' } },
-                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } },
-                    alignment: { horizontal: 'left', vertical: 'middle' },
-                    border: {
-                        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                    }
-                },
-                headerStyle: {
-                    font: { bold: true, size: 11, color: { argb: 'FFFFFFFF' } },
-                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF336699' } },
-                    alignment: { horizontal: 'center', vertical: 'middle' },
-                    border: {
-                        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                    }
-                },
-                rowEvenStyle: {
-                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } },
-                    border: {
-                        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                    }
-                },
-                rowOddStyle: {
-                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } },
-                    border: {
-                        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                    }
-                },
-                totalStyle: {
-                    font: { bold: true, size: 11 },
-                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } },
-                    alignment: { horizontal: 'right', vertical: 'middle' },
-                    border: {
-                        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                        right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-                    }
-                }
-            };
-            
-            // 9. Definición de columnas
-            worksheet.columns = [
-                { header: 'ID Compra', key: 'id', width: 15 },
-                { header: 'Fecha', key: 'date', width: 15 },
-                { header: 'Producto', key: 'product', width: 30 },
-                { header: 'Total', key: 'total', width: 20 }
-            ];
-            
-            // 10. Título del informe
-            worksheet.mergeCells('A1:D2');
-            const titleCell = worksheet.getCell('A1');
-            titleCell.value = 'Informe de Compras - IceSoft';
-            titleCell.style = styles.titleStyle;
-            worksheet.getRow(1).height = 30;
-            
-            // 11. Información del informe
-            // Fecha actual
-            const now = new Date();
-            const formattedDateTime = now.toLocaleString('es-CO');
-            
-            // Periodo
-            worksheet.mergeCells('A3:D3');
-            const periodCell = worksheet.getCell('A3');
-            periodCell.value = `Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`;
-            periodCell.style = {
-                font: { size: 10 },
-                alignment: { horizontal: 'left', vertical: 'middle' }
-            };
-            
-            // Producto
-            worksheet.mergeCells('A4:D4');
-            const productCell = worksheet.getCell('A4');
-            if (productInfo) {
-                productCell.value = `Producto: ${productInfo.name}`;
-            } else {
-                productCell.value = 'Producto: Todos';
-            }
-            productCell.style = {
-                font: { size: 10 },
-                alignment: { horizontal: 'left', vertical: 'middle' }
-            };
-            
-            // Fecha de generación
-            worksheet.mergeCells('A5:D5');
-            const dateCell = worksheet.getCell('A5');
-            dateCell.value = `Generado: ${formattedDateTime}`;
-            dateCell.style = {
-                font: { size: 10, italic: true },
-                alignment: { horizontal: 'left', vertical: 'middle' }
-            };
-            
-            // 12. Resumen
-            const totalAmount = purchases.reduce((sum, purchase) => sum + purchase.total, 0);
-            
-            worksheet.mergeCells('A7:D7');
-            const summaryTitle = worksheet.getCell('A7');
-            summaryTitle.value = 'Resumen';
-            summaryTitle.style = styles.subtitleStyle;
-            
-            worksheet.mergeCells('A8:C8');
-            worksheet.getCell('A8').value = 'Total de Compras:';
-            worksheet.getCell('A8').style = {
-                font: { bold: true },
-                alignment: { horizontal: 'right' }
-            };
-            worksheet.getCell('D8').value = purchases.length;
-            
-            worksheet.mergeCells('A9:C9');
-            worksheet.getCell('A9').value = 'Total:';
-            worksheet.getCell('A9').style = {
-                font: { bold: true },
-                alignment: { horizontal: 'right' }
-            };
-            worksheet.getCell('D9').value = totalAmount;
-            worksheet.getCell('D9').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-            
-            // 13. Tabla de datos
-            const tableStartRow = 12;
-            
-            // Configurar estilo de encabezados
-            const headerRow = worksheet.getRow(tableStartRow);
-            headerRow.height = 20;
-            headerRow.eachCell((cell) => {
-                cell.style = styles.headerStyle;
-            });
-            
-            // Añadir filas de datos
-            let rowNumber = tableStartRow + 1;
-            purchases.forEach((purchase, index) => {
-                // Obtener el nombre del producto
-                let productName = "Desconocido";
-                if (purchase.product) {
-                    if (typeof purchase.product === 'object' && purchase.product.name) {
-                        productName = purchase.product.name;
-                    } else if (purchase.productName) {
-                        productName = purchase.productName;
-                    }
-                }
-                
-                const row = worksheet.addRow({
-                    id: purchase.id || (purchase._id ? purchase._id.toString().substring(0, 8) : "N/A"),
-                    date: purchase.purchaseDate ? new Date(purchase.purchaseDate) : null,
-                    product: productName,
-                    total: purchase.total || 0
-                });
-                
-                // Aplicar estilos alternados a las filas
-                const rowStyle = index % 2 === 0 ? styles.rowEvenStyle : styles.rowOddStyle;
-                row.eachCell((cell) => {
-                    cell.style = { 
-                        ...cell.style,
-                        ...rowStyle
-                    };
-                });
-                
-                rowNumber++;
-            });
-            
-            // 14. Formato de columnas
-            // Formato de fecha
-            worksheet.getColumn('date').numFmt = 'dd/mm/yyyy';
-            
-            // Formato de moneda
-            worksheet.getColumn('total').numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-            worksheet.getColumn('total').alignment = { horizontal: 'right' };
-            
-            // 15. Fila de totales
-            const totalsRow = worksheet.addRow(['Total', '', '', totalAmount]);
-            totalsRow.eachCell((cell) => {
-                cell.style = styles.totalStyle;
-            });
-            worksheet.getCell(`D${rowNumber}`).numFmt = '"$"#,##0_-;[Red]-"$"#,##0_-';
-            
-            // 16. Pie de página
-            const footerRow = rowNumber + 2;
-            worksheet.mergeCells(`A${footerRow}:D${footerRow}`);
-            const footerCell = worksheet.getCell(`A${footerRow}`);
-            footerCell.value = 'IceSoft - Sistema de Gestión de Compras';
-            footerCell.style = {
-                font: { size: 8, italic: true, color: { argb: 'FF666666' } },
-                alignment: { horizontal: 'center' }
-            };
-            
-            // 17. Configuración de la respuesta HTTP
-            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.setHeader('Content-Disposition', `attachment; filename=compras-informe-${Date.now()}.xlsx`);
-            
-            // 18. Envío del archivo
-            console.log("Generando archivo Excel...");
-            await workbook.xlsx.write(res);
-            console.log("Archivo Excel generado y enviado correctamente");
-            res.end();
-            
+            await generateExcelReport(reportOptions, res);
+            console.log("Excel file generated and sent successfully");
         } catch (excelError) {
-            console.error("Error al generar archivo Excel:", excelError);
+            console.error("Error generating Excel file:", excelError);
             
-            // Si la respuesta no ha sido enviada, enviar error
             if (!res.headersSent) {
                 return res.status(500).json({ 
-                    message: "Error al generar el informe Excel", 
+                    message: "Error generating Excel report", 
                     error: excelError.message 
                 });
             }
         }
         
     } catch (error) {
-        console.error("Error general en la generación del Excel:", error);
+        console.error("Error generating Excel report:", error);
         
-        // Si la respuesta no ha sido enviada, enviar error
         if (!res.headersSent) {
             return res.status(500).json({ 
-                message: "Error al generar el informe Excel", 
-                error: error.message 
+                message: "Error generating Excel report", 
+                error: error.message
             });
         }
-    }
-};
-
-// GET: Generate purchase statistics
-export const getPurchaseStatistics = async (req, res) => {
-    try {
-        if (!checkPermission(req.user.role, "view_purchases")) {
-            return res.status(403).json({ message: "Unauthorized access" });
-        }
-
-        // Parse query parameters for filtering
-        const { startDate, endDate, period = 'monthly' } = req.query;
-        
-        // Build date range filter
-        let dateFilter = {};
-        if (startDate || endDate) {
-            dateFilter = {};
-            if (startDate) dateFilter.$gte = new Date(startDate);
-            if (endDate) dateFilter.$lte = new Date(endDate);
-        } else {
-            // Default to last 12 months if no date range specified
-            const endDateDefault = new Date();
-            const startDateDefault = new Date();
-            startDateDefault.setMonth(startDateDefault.getMonth() - 11);
-            startDateDefault.setDate(1);
-            dateFilter = { $gte: startDateDefault, $lte: endDateDefault };
-        }
-
-        // Determine grouping format based on period
-        let dateFormat, dateField;
-        if (period === 'daily') {
-            dateFormat = '%Y-%m-%d';
-            dateField = { $dateToString: { format: '%Y-%m-%d', date: '$purchaseDate' } };
-        } else if (period === 'weekly') {
-            // For weekly, we'll use week number in year
-            dateFormat = '%Y-W%V';
-            dateField = { 
-                $concat: [
-                    { $dateToString: { format: '%Y-W', date: '$purchaseDate' } },
-                    { $toString: { $week: '$purchaseDate' } }
-                ]
-            };
-        } else if (period === 'yearly') {
-            dateFormat = '%Y';
-            dateField = { $dateToString: { format: '%Y', date: '$purchaseDate' } };
-        } else {
-            // Default to monthly
-            dateFormat = '%Y-%m';
-            dateField = { $dateToString: { format: '%Y-%m', date: '$purchaseDate' } };
-        }
-
-        // Run aggregation query
-        const statistics = await Purchase.aggregate([
-            {
-                $match: {
-                    purchaseDate: dateFilter
-                }
-            },
-            {
-                $group: {
-                    _id: dateField,
-                    count: { $sum: 1 },
-                    totalAmount: { $sum: '$total' },
-                    avgAmount: { $avg: '$total' },
-                    minAmount: { $min: '$total' },
-                    maxAmount: { $max: '$total' }
-                }
-            },
-            {
-                $sort: { _id: 1 }
-            },
-            {
-                $project: {
-                    _id: 0,
-                    period: '$_id',
-                    count: 1,
-                    totalAmount: { $round: ['$totalAmount', 2] },
-                    avgAmount: { $round: ['$avgAmount', 2] },
-                    minAmount: { $round: ['$minAmount', 2] },
-                    maxAmount: { $round: ['$maxAmount', 2] }
-                }
-            }
-        ]);
-
-        // Calculate overall statistics
-        const overall = await Purchase.aggregate([
-            {
-                $match: {
-                    purchaseDate: dateFilter
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalPurchases: { $sum: 1 },
-                    totalAmount: { $sum: '$total' },
-                    avgAmount: { $avg: '$total' },
-                    minAmount: { $min: '$total' },
-                    maxAmount: { $max: '$total' }
-                }
-            },
-            {
-                $project: {
-                    _id: 0,
-                    totalPurchases: 1,
-                    totalAmount: { $round: ['$totalAmount', 2] },
-                    avgAmount: { $round: ['$avgAmount', 2] },
-                    minAmount: { $round: ['$minAmount', 2] },
-                    maxAmount: { $round: ['$maxAmount', 2] }
-                }
-            }
-        ]);
-
-        // Get top products by purchase amount
-        const topProducts = await Purchase.aggregate([
-            {
-                $match: {
-                    purchaseDate: dateFilter
-                }
-            },
-            {
-                $group: {
-                    _id: '$product',
-                    count: { $sum: 1 },
-                    totalAmount: { $sum: '$total' }
-                }
-            },
-            {
-                $sort: { totalAmount: -1 }
-            },
-            {
-                $limit: 5
-            },
-            {
-                $lookup: {
-                    from: 'products',
-                    localField: '_id',
-                    foreignField: '_id',
-                    as: 'productInfo'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$productInfo',
-                    preserveNullAndEmptyArrays: true
-                }
-            },
-            {
-                $project: {
-                    _id: 0,
-                    productId: '$_id',
-                    productName: { $ifNull: ['$productInfo.name', 'Unknown'] },
-                    count: 1,
-                    totalAmount: { $round: ['$totalAmount', 2] }
-                }
-            }
-        ]);
-
-        // Return the complete statistics
-        res.status(200).json({
-            overall: overall.length > 0 ? overall[0] : {
-                totalPurchases: 0,
-                totalAmount: 0,
-                avgAmount: 0,
-                minAmount: 0,
-                maxAmount: 0
-            },
-            periodStats: statistics,
-            topProducts,
-            period,
-            dateRange: {
-                startDate: dateFilter.$gte ? dateFilter.$gte.toISOString().split('T')[0] : null,
-                endDate: dateFilter.$lte ? dateFilter.$lte.toISOString().split('T')[0] : null
-            }
-        });
-        
-    } catch (error) {
-        console.error("Error generating purchase statistics:", error);
-        res.status(500).json({ message: "Error generating statistics", error: error.message });
     }
 };

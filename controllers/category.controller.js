@@ -79,7 +79,7 @@ export const postCategory = async (req, res) => {
             return res.status(400).json({ message: "Description must be between 5 and 200 characters" });
         }
 
-        if (!["active", "inactive"].includes(status)) {
+        if (status && !['active', 'inactive'].includes(status)) {
             return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
@@ -159,6 +159,44 @@ export const putCategory = async (req, res) => {
         res.status(200).json({ message: "Category updated successfully", category: updatedCategory });
     } catch (error) {
         console.error("Error updating category:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+// Update category status
+export const updateCategoryStatus = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "update_status_categories")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid category ID" });
+        }
+
+        if (!status || !["active", "inactive"].includes(status)) {
+            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
+        }
+
+        const updatedCategory = await Category.findByIdAndUpdate(
+            id,
+            { status },
+            { new: true, runValidators: true }
+        ).select("id name description status");
+
+        if (!updatedCategory) {
+            return res.status(404).json({ message: "Category not found" });
+        }
+
+        res.status(200).json({ 
+            message: `Category ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
+            category: updatedCategory 
+        });
+    } catch (error) {
+        console.error("Error updating category status:", error);
         res.status(500).json({ message: "Server error" });
     }
 };

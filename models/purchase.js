@@ -10,7 +10,8 @@ const PurchaseSchema = new mongoose.Schema({
     }],
     total: { type: Number, required: true },
     details: { type: String, required: true },
-    purchaseDate: { type: Date, default: Date.now }
+    purchaseDate: { type: Date, default: Date.now },
+    status: { type: String, enum: ["active", "inactive"], default: "active" }
 }, { timestamps: true });
 
 export default mongoose.model("Purchase", PurchaseSchema);

@@ -178,6 +178,44 @@ export const putProvider = async (req, res) => {
     }
 };
 
+// Update provider status
+export const updateProviderStatus = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "update_status_providers")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid provider ID" });
+        }
+
+        if (!status || !["active", "inactive"].includes(status.toLowerCase())) {
+            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
+        }
+
+        const updatedProvider = await Provider.findByIdAndUpdate(
+            id,
+            { status: status.toLowerCase() },
+            { new: true, runValidators: true }
+        ).select("id name contact_number address email personal_phone status");
+
+        if (!updatedProvider) {
+            return res.status(404).json({ message: "Provider not found" });
+        }
+
+        res.status(200).json({ 
+            message: `Provider ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
+            provider: updatedProvider 
+        });
+    } catch (error) {
+        console.error("Error updating provider status:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 // Delete a provider
 export const deleteProvider = async (req, res) => {
     try {

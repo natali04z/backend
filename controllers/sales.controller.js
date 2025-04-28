@@ -63,7 +63,6 @@ function validateSaleData(data, isUpdate = false) {
 }
 
 // GET: Retrieve all sales
-// GET: Retrieve all sales
 export const getSales = async (req, res) => {
     try {
         // Check if req.user exists before accessing its role property

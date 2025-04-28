@@ -4,7 +4,8 @@ import {
     getProductById,
     postProduct,
     updateProduct,
-    deleteProduct
+    deleteProduct,
+    updateProductStatus
 } from "../controllers/product.controller.js";
 
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
@@ -16,5 +17,6 @@ router.get("/:id", authenticateUser, authorizePermission("view_products_id"), ge
 router.post("/", authenticateUser, authorizePermission("create_products"), postProduct);
 router.put("/:id", authenticateUser, authorizePermission("edit_products"), updateProduct);
 router.delete("/:id", authenticateUser, authorizePermission("delete_products"), deleteProduct);
+router.patch("/:id/status", authenticateUser, authorizePermission("update_status_products"), updateProductStatus);
 
 export default router;

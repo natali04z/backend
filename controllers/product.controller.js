@@ -125,9 +125,19 @@ export const postProduct = async (req, res) => {
             return res.status(404).json({ message: "Category not found" });
         }
 
+        // Verificar si la categoría está activa
+        if (existingCategory.status !== "active") {
+            return res.status(400).json({ message: "Cannot use inactive category" });
+        }
+
         const existingProvider = await Provider.findById(provider);
         if (!existingProvider) {
             return res.status(404).json({ message: "Provider not found" });
+        }
+
+        // Verificar si el proveedor está activo
+        if (existingProvider.status !== "active") {
+            return res.status(400).json({ message: "Cannot use inactive provider" });
         }
 
         // Validación para precios en pesos colombianos (valores más altos)
@@ -217,6 +227,10 @@ export const updateProduct = async (req, res) => {
             if (!existingCategory) {
                 return res.status(404).json({ message: "Category not found" });
             }
+            // Verificar si la categoría está activa
+            if (existingCategory.status !== "active") {
+                return res.status(400).json({ message: "Cannot use inactive category" });
+            }
             categoryId = existingCategory._id;
         }
         
@@ -225,6 +239,10 @@ export const updateProduct = async (req, res) => {
             const existingProvider = await Provider.findById(provider);
             if (!existingProvider) {
                 return res.status(404).json({ message: "Provider not found" });
+            }
+            // Verificar si el proveedor está activo
+            if (existingProvider.status !== "active") {
+                return res.status(400).json({ message: "Cannot use inactive provider" });
             }
             providerId = existingProvider._id;
         }
@@ -306,6 +324,50 @@ export const updateProduct = async (req, res) => {
         res.status(200).json({ message: "Product updated successfully", product: formattedProduct });
     } catch (error) {
         console.error("Error updating product:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+// Update product status
+export const updateProductStatus = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "update_status_products")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid product ID" });
+        }
+
+        if (!status || !["active", "inactive"].includes(status)) {
+            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
+        }
+
+        const updatedProduct = await Product.findByIdAndUpdate(
+            id,
+            { status },
+            { new: true, runValidators: true }
+        )
+            .select("id name price stock minimumStock status category provider batchDate expirationDate")
+            .populate("category", "name")
+            .populate("provider", "name");
+
+        if (!updatedProduct) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        // Formatear fechas y precios en la respuesta
+        const formattedProduct = formatProduct(updatedProduct);
+
+        res.status(200).json({ 
+            message: `Product ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
+            product: formattedProduct 
+        });
+    } catch (error) {
+        console.error("Error updating product status:", error);
         res.status(500).json({ message: "Server error" });
     }
 };
