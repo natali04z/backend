@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getProviders, getOneProvider, postProvider, putProvider, deleteProvider } from "../controllers/provider.controller.js";
+import { getProviders, getOneProvider, postProvider, putProvider, deleteProvider, updateProviderStatus } from "../controllers/provider.controller.js";
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
 
 const router = Router();
@@ -9,6 +9,6 @@ router.get("/:id",authenticateUser, authorizePermission("view_providers_id"), ge
 router.post("/", authenticateUser, authorizePermission("create_providers"),postProvider);
 router.put("/:id", authenticateUser, authorizePermission("update_providers"),putProvider);
 router.delete("/:id", authenticateUser, authorizePermission("delete_providers"), deleteProvider);
-router.patch("/:id/status", authenticateUser, authorizePermission("update_status_categories"), updateCategoryStatus);
+router.patch("/:id/status", authenticateUser, authorizePermission("update_status_providers"), updateProviderStatus);
 
 export default router
