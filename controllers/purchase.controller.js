@@ -4,7 +4,6 @@ import Product from "../models/product.js";
 import { checkPermission } from "../utils/permissions.js";
 import { generatePdfReport, generateExcelReport } from "../utils/report-exporters.js";
 
-// Function to generate purchase ID
 async function generatePurchaseId() {
     const lastPurchase = await Purchase.findOne().sort({ createdAt: -1 });
     if (!lastPurchase || !/^Pu\d{2}$/.test(lastPurchase.id)) {
@@ -16,23 +15,19 @@ async function generatePurchaseId() {
     return `Pu${nextNumber}`;
 }
 
-// Validate purchase data
 function validatePurchaseData(data, isUpdate = false) {
     const errors = [];
     
-    // Only validate required fields if it's not an update
     if (!isUpdate) {
         if (!data.product) errors.push("Product is required");
         if (data.total === undefined) errors.push("Total is required");
         if (!data.details) errors.push("Details are required");
     }
     
-    // Validate product ID if provided
     if (data.product && !mongoose.Types.ObjectId.isValid(data.product)) {
         errors.push("Invalid product ID format");
     }
     
-    // Validate numeric fields
     if (data.total !== undefined) {
         if (typeof data.total !== "number") {
             errors.push("Total must be a number");
@@ -41,7 +36,6 @@ function validatePurchaseData(data, isUpdate = false) {
         }
     }
     
-    // Validate date if provided
     if (data.purchaseDate !== undefined) {
         const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z)?$/;
         if (!dateRegex.test(data.purchaseDate) && !(data.purchaseDate instanceof Date)) {
@@ -49,12 +43,10 @@ function validatePurchaseData(data, isUpdate = false) {
         }
     }
     
-    // Validate string fields
     if (data.details !== undefined && (typeof data.details !== "string" || data.details.trim() === "")) {
         errors.push("Details must be a non-empty string");
     }
     
-    // Validate status if provided
     if (data.status !== undefined && !["active", "inactive"].includes(data.status)) {
         errors.push("Status must be either 'active' or 'inactive'");
     }
@@ -65,40 +57,30 @@ function validatePurchaseData(data, isUpdate = false) {
 // GET: Retrieve all purchases
 export const getPurchases = async (req, res) => {
     try {        
-        // Verificar si req.user existe antes de acceder a su propiedad role
         if (!req.user || !checkPermission(req.user.role, "view_purchases")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        // Consultar todas las compras
         console.log("Ejecutando consulta de compras");
         const purchases = await Purchase.find();
         console.log(`Encontradas ${purchases.length} compras`);
 
-        // Formato para la respuesta, manejar tanto la estructura antigua como la nueva
         const formattedPurchases = purchases.map(purchase => {
             const purchaseObj = purchase.toObject();
             
-            // Formatear la fecha de compra
             if (purchaseObj.purchaseDate) {
                 purchaseObj.purchaseDate = new Date(purchaseObj.purchaseDate).toISOString().split('T')[0];
             }
             
-            // Manejar el caso donde tenemos un array de productos (nueva estructura)
             if (Array.isArray(purchaseObj.products)) {
-                // Ya tenemos la estructura correcta, pero podríamos formatear algo si es necesario
             } 
-            // Manejar el caso donde tenemos una referencia simple a producto (estructura antigua)
             else if (purchaseObj.product) {
-                // Convertir la estructura antigua a la nueva para mantener consistencia
                 purchaseObj.products = [{
                     product: purchaseObj.product,
                     quantity: 1,
                     price: purchaseObj.total,
                     total: purchaseObj.total
                 }];
-                // Podríamos eliminar el campo antiguo si queremos
-                // delete purchaseObj.product;
             }
             
             return purchaseObj;
@@ -114,7 +96,6 @@ export const getPurchases = async (req, res) => {
 // GET: Retrieve a single purchase by ID
 export const getPurchaseById = async (req, res) => {
     try {
-        // Verificar si req.user existe antes de acceder a su propiedad role
         if (!req.user || !checkPermission(req.user.role, "view_purchases_id")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
@@ -131,18 +112,10 @@ export const getPurchaseById = async (req, res) => {
             return res.status(404).json({ message: "Purchase not found" });
         }
 
-        // Formatear la respuesta según la estructura de la compra
         const formattedPurchase = purchase.toObject();
         
-        // Formatear la fecha de compra
         if (formattedPurchase.purchaseDate) {
             formattedPurchase.purchaseDate = new Date(formattedPurchase.purchaseDate).toISOString().split('T')[0];
-        }
-        
-        // Si existe el array de productos, poblar información de cada producto
-        if (Array.isArray(formattedPurchase.products)) {
-            // Opcionalmente podríamos poblar información adicional de los productos
-            // Podría requerir consultas adicionales
         }
 
         res.status(200).json(formattedPurchase);
@@ -161,50 +134,40 @@ export const postPurchase = async (req, res) => {
 
         const { products, details, purchaseDate, status = "active" } = req.body;
 
-        // Validate status
         if (!["active", "inactive"].includes(status)) {
             return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
         }
 
-        // Validate if products array exists and is not empty
         if (!Array.isArray(products) || products.length === 0) {
             return res.status(400).json({ message: "At least one product is required" });
         }
 
-        // Initialize total
         let total = 0;
         let validatedProducts = [];
 
-        // Validate and process each product
         for (let i = 0; i < products.length; i++) {
             const item = products[i];
             
-            // Check product ID
             if (!item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
                 return res.status(400).json({ message: `Invalid product ID at index ${i}` });
             }
 
-            // Find product in database
             const foundProduct = await Product.findById(item.product);
             if (!foundProduct) {
                 return res.status(404).json({ message: `Product not found at index ${i}` });
             }
 
-            // Verificar si el producto está activo
             if (foundProduct.status !== "active") {
                 return res.status(400).json({ message: `Cannot use inactive product at index ${i}` });
             }
 
-            // Validate quantity
             if (!item.quantity || typeof item.quantity !== 'number' || item.quantity <= 0) {
                 return res.status(400).json({ message: `Invalid quantity at index ${i}` });
             }
 
-            // Calculate item total
             const itemPrice = foundProduct.price;
             const itemTotal = itemPrice * item.quantity;
             
-            // Add to validated products
             validatedProducts.push({
                 product: item.product,
                 quantity: item.quantity,
@@ -212,14 +175,15 @@ export const postPurchase = async (req, res) => {
                 total: itemTotal
             });
             
-            // Add to overall total
             total += itemTotal;
+
+            // Incrementar el stock del producto
+            foundProduct.stock += item.quantity;
+            await foundProduct.save();
         }
 
-        // Generate purchase ID
         const id = await generatePurchaseId();
 
-        // Create new purchase
         const newPurchase = new Purchase({
             id,
             products: validatedProducts,
@@ -229,17 +193,15 @@ export const postPurchase = async (req, res) => {
             status
         });
 
-        // Save to database
         await newPurchase.save();
 
-        // Format the response
         const formattedPurchase = newPurchase.toObject();
         if (formattedPurchase.purchaseDate) {
             formattedPurchase.purchaseDate = new Date(formattedPurchase.purchaseDate).toISOString().split('T')[0];
         }
 
         res.status(201).json({ 
-            message: "Purchase created successfully", 
+            message: "Purchase created successfully and product stock updated", 
             purchase: formattedPurchase 
         });
     } catch (error) {
@@ -262,7 +224,6 @@ export const updatePurchase = async (req, res) => {
             return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Validate input data (with isUpdate flag)
         const validationErrors = validatePurchaseData(req.body, true);
         if (validationErrors.length > 0) {
             return res.status(400).json({ message: "Validation failed", errors: validationErrors });
@@ -270,14 +231,12 @@ export const updatePurchase = async (req, res) => {
 
         let updateFields = {};
 
-        // Check and update product if provided
         if (product) {
             const existingProduct = await Product.findById(product);
             if (!existingProduct) {
                 return res.status(404).json({ message: "Product not found" });
             }
             
-            // Verificar si el producto está activo
             if (existingProduct.status !== "active") {
                 return res.status(400).json({ message: "Cannot use inactive product" });
             }
@@ -285,13 +244,11 @@ export const updatePurchase = async (req, res) => {
             updateFields.product = product;
         }
 
-        // Update other fields if provided
         if (purchaseDate !== undefined) updateFields.purchaseDate = purchaseDate;
         if (total !== undefined) updateFields.total = total;
         if (details !== undefined) updateFields.details = details;
         if (status !== undefined) updateFields.status = status;
         
-        // Check if there are fields to update
         if (Object.keys(updateFields).length === 0) {
             return res.status(400).json({ message: "No valid fields to update" });
         }
@@ -307,7 +264,6 @@ export const updatePurchase = async (req, res) => {
             return res.status(404).json({ message: "Purchase not found" });
         }
 
-        // Format the date in the response
         const formattedPurchase = updatedPurchase.toObject();
         if (formattedPurchase.purchaseDate) {
             formattedPurchase.purchaseDate = new Date(formattedPurchase.purchaseDate).toISOString().split('T')[0];
@@ -317,7 +273,6 @@ export const updatePurchase = async (req, res) => {
     } catch (error) {
         console.error("Error updating purchase:", error);
         
-        // Handle Mongoose validation errors
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
             return res.status(400).json({ message: "Validation failed", errors });
@@ -357,7 +312,6 @@ export const updatePurchaseStatus = async (req, res) => {
             return res.status(404).json({ message: "Purchase not found" });
         }
 
-        // Format the date in the response
         const formattedPurchase = updatedPurchase.toObject();
         if (formattedPurchase.purchaseDate) {
             formattedPurchase.purchaseDate = new Date(formattedPurchase.purchaseDate).toISOString().split('T')[0];

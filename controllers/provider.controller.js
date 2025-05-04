@@ -14,14 +14,14 @@ async function generateProviderId() {
     return `Pr${nextNumber}`;
 }
 
-// Get all providers
+// Obtener todos los proveedores
 export const getProviders = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_providers")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const providers = await Provider.find().select("id name contact_number address email personal_phone status");
+        const providers = await Provider.find().select("id nit company name contact_phone email status");
         
         res.status(200).json(providers);
     } catch (error) {
@@ -30,7 +30,7 @@ export const getProviders = async (req, res) => {
     }
 };
 
-// Get provider by ID
+// Obtener proveedor por ID
 export const getOneProvider = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_providers_id")) {
@@ -43,7 +43,7 @@ export const getOneProvider = async (req, res) => {
             return res.status(400).json({ message: "Invalid provider ID" });
         }
 
-        const provider = await Provider.findById(id).select("id name contact_number address email personal_phone status");
+        const provider = await Provider.findById(id).select("id nit company name contact_phone email status");
 
         if (!provider) {
             return res.status(404).json({ message: "Provider not found" });
@@ -56,37 +56,29 @@ export const getOneProvider = async (req, res) => {
     }
 };
 
-// Create a new provider
+// Crear un nuevo proveedor
 export const postProvider = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_providers")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { name, contact_number, address, email, personal_phone, status } = req.body;
+        const { nit, company, name, contact_phone, email } = req.body;
 
-        if (!name || !contact_number || !address || !email || !personal_phone || !status) {
+        if (!nit || !company || !name || !contact_phone || !email) {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        if (!/^\d{10,}$/.test(contact_number)) {
-            return res.status(400).json({ message: "Contact number must be at least 10 digits" });
-        }
-
-        if (!/^\d{10,}$/.test(personal_phone)) {
-            return res.status(400).json({ message: "Personal phone must be at least 10 digits" });
+        if (!/^\d{10,}$/.test(contact_phone)) {
+            return res.status(400).json({ message: "Contact phone must be at least 10 digits" });
         }
 
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             return res.status(400).json({ message: "Invalid email format" });
         }
 
-        if (address.length < 5 || address.length > 100) {
-            return res.status(400).json({ message: "Address must be between 5 and 100 characters" });
-        }
-
-        if (!["active", "inactive"].includes(status.toLowerCase())) {
-            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
+        if (company.length < 2 || company.length > 100) {
+            return res.status(400).json({ message: "Company name must be between 2 and 100 characters" });
         }
 
         const existingProvider = await Provider.findOne({ email });
@@ -97,12 +89,12 @@ export const postProvider = async (req, res) => {
         const id = await generateProviderId();
         const newProvider = new Provider({
             id,
+            nit,
+            company,
             name,
-            contact_number,
-            address,
+            contact_phone,
             email,
-            personal_phone,
-            status: status.toLowerCase()
+            status: "active"
         });
 
         await newProvider.save();
@@ -113,7 +105,7 @@ export const postProvider = async (req, res) => {
     }
 };
 
-// Update a provider
+// Actualizar un proveedor
 export const putProvider = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_providers")) {
@@ -121,51 +113,40 @@ export const putProvider = async (req, res) => {
         }
 
         const { id } = req.params;
-        const { name, contact_number, address, email, personal_phone, status } = req.body;
+        const { nit, company, name, contact_phone, email } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid provider ID" });
         }
 
-        // Validate fields if they are provided
         if (name === "") {
             return res.status(400).json({ message: "Name cannot be empty" });
         }
 
-        if (contact_number && !/^\d{10,}$/.test(contact_number)) {
-            return res.status(400).json({ message: "Contact number must be at least 10 digits" });
-        }
-
-        if (personal_phone && !/^\d{10,}$/.test(personal_phone)) {
-            return res.status(400).json({ message: "Personal phone must be at least 10 digits" });
+        if (contact_phone && !/^\d{10,}$/.test(contact_phone)) {
+            return res.status(400).json({ message: "Contact phone must be at least 10 digits" });
         }
 
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             return res.status(400).json({ message: "Invalid email format" });
         }
 
-        if (address && (address.length < 5 || address.length > 100)) {
-            return res.status(400).json({ message: "Address must be between 5 and 100 characters" });
+        if (company && (company.length < 2 || company.length > 100)) {
+            return res.status(400).json({ message: "Company name must be between 2 and 100 characters" });
         }
 
-        if (status && !["active", "inactive"].includes(status.toLowerCase())) {
-            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
-        }
-
-        // Create update object with only the provided fields
         const updateData = {};
+        if (nit) updateData.nit = nit;
+        if (company) updateData.company = company;
         if (name) updateData.name = name;
-        if (contact_number) updateData.contact_number = contact_number;
-        if (address) updateData.address = address;
+        if (contact_phone) updateData.contact_phone = contact_phone;
         if (email) updateData.email = email;
-        if (personal_phone) updateData.personal_phone = personal_phone;
-        if (status) updateData.status = status.toLowerCase();
 
         const updatedProvider = await Provider.findByIdAndUpdate(
             id,
             updateData,
             { new: true, runValidators: true }
-        ).select("id name contact_number address email personal_phone status");
+        ).select("id nit company name contact_phone email status");
 
         if (!updatedProvider) {
             return res.status(404).json({ message: "Provider not found" });
@@ -178,7 +159,7 @@ export const putProvider = async (req, res) => {
     }
 };
 
-// Update provider status
+// Actualizar estado del proveedor
 export const updateProviderStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_providers")) {
@@ -200,7 +181,7 @@ export const updateProviderStatus = async (req, res) => {
             id,
             { status: status.toLowerCase() },
             { new: true, runValidators: true }
-        ).select("id name contact_number address email personal_phone status");
+        ).select("id nit company name contact_phone email status");
 
         if (!updatedProvider) {
             return res.status(404).json({ message: "Provider not found" });
@@ -216,7 +197,7 @@ export const updateProviderStatus = async (req, res) => {
     }
 };
 
-// Delete a provider
+// Eliminar un proveedor
 export const deleteProvider = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_providers")) {

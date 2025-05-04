@@ -2,19 +2,18 @@ import User from "../models/user.js";
 import Role from "../models/role.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import crypto from 'crypto';
+import { sendEmail } from '../utils/emailService.js';
 
-// Register user
-
+// Registrar usuario
 export const registerUser = async (req, res) => {
     try {
-        const { name, lastname, contact_number, email, password, role, status } = req.body;
+        const { name, lastname, contact_number, email, password, role } = req.body;
 
-        // Validate required fields
         if (!name || !lastname || !contact_number || !email || !password || !role) {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        // Check if user already exists
         const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(400).json({ message: "Email already in use" });
@@ -41,14 +40,8 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid role name" });
         }
 
-        if (status && !['active', 'inactive'].includes(status)) {
-            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
-        }
-
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create and save user
         const newUser = new User({
             name,
             lastname,
@@ -56,20 +49,18 @@ export const registerUser = async (req, res) => {
             email,
             password: hashedPassword,
             role: roleDoc._id,
-            status: status || 'active'
+            status: 'active'
         });
 
         await newUser.save();
         await newUser.populate("role", "name");
 
-        // Generate JWT
         const token = jwt.sign(
             { id: newUser._id, role: newUser.role._id },
             process.env.JWT_SECRET,
-            { expiresIn: "24h" }
+            { expiresIn: "15m" }
         );
 
-        // Respond
         res.status(201).json({
             message: "User registered successfully",
             token,
@@ -88,7 +79,7 @@ export const registerUser = async (req, res) => {
     }
 };
 
-// LOGIN USER
+// Iniciar sesión de usuario
 export const loginUser = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -102,7 +93,6 @@ export const loginUser = async (req, res) => {
             return res.status(401).json({ message: "Invalid credentials" });
         }
 
-        // Verificar si el usuario está activo
         if (user.status === 'inactive') {
             return res.status(403).json({ 
                 message: "Your account is inactive. Please contact an administrator." 
@@ -117,7 +107,7 @@ export const loginUser = async (req, res) => {
         const token = jwt.sign(
             {id: user._id, role: user.role._id},
             process.env.JWT_SECRET,
-            { expiresIn: "1d" }
+            { expiresIn: "15m" }
         );
 
         res.json({ 
@@ -137,7 +127,7 @@ export const loginUser = async (req, res) => {
     }
 };
 
-// GET AUTHENTICATED USER
+// Obtener usuario autenticado
 export const getAuthenticatedUser = async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select("-password");
@@ -150,27 +140,124 @@ export const getAuthenticatedUser = async (req, res) => {
     }
 };
 
-// RESET/CHANGE PASSWORD (without email link)
-export const changeOwnPassword = async (req, res) => {
+// Solicitar restablecimiento de contraseña
+export const requestPasswordReset = async (req, res) => {
+    let user;
     try {
-        const { newPassword } = req.body;
+        const { email } = req.body;
 
-        if (!newPassword) {
-            return res.status(400).json({ message: "New password is required" });
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
         }
 
-        const user = await User.findById(req.user.id); // Solo el usuario logueado
+        user = await User.findOne({ email });
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
 
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        
+        user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+        user.resetPasswordExpires = Date.now() + 3600000; // Token válido por 1 hora
+        await user.save();
+
+        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+        const message = `
+            <h1>Password Reset Request</h1>
+            <p>Please click on the following link to reset your password:</p>
+            <a href="${resetUrl}" clicktracking="off">Reset My Password</a>
+            <p>This link will expire in 1 hour.</p>
+            <p>If you did not request this reset, please ignore this email.</p>
+        `;
+
+        await sendEmail({
+            to: user.email,
+            subject: 'Password Reset Request',
+            html: message
+        });
+
+        res.status(200).json({ message: "Password reset email sent successfully" });
+    } catch (error) {
+        if (user) {
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpires = undefined;
+            await user.save();
+        }
+
+        res.status(500).json({ message: "Error sending reset email", error: error.message });
+    }
+};
+
+// Restablecer contraseña con token
+export const resetPassword = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ message: "Token and new password are required" });
+        }
+
+        const resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
+
+        const user = await User.findOne({
+            resetPasswordToken,
+            resetPasswordExpires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Invalid or expired token" });
+        }
+
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         user.password = hashedPassword;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
         await user.save();
 
         res.status(200).json({ message: "Password changed successfully" });
     } catch (error) {
         res.status(500).json({ message: "Error changing password", error: error.message });
+    }
+};
+
+// Solicitar enlace para configurar contraseña después del primer inicio de sesión
+export const requestPasswordSetup = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        const setupToken = crypto.randomBytes(32).toString('hex');
+        
+        user.resetPasswordToken = crypto.createHash('sha256').update(setupToken).digest('hex');
+        user.resetPasswordExpires = Date.now() + 3600000;
+        await user.save();
+
+        const setupUrl = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
+
+        const message = `
+            <h1>Set Your Password - IceSoft</h1>
+            <p>Hello ${user.name},</p>
+            <p>Please click on the following link to set up your password:</p>
+            <a href="${setupUrl}" clicktracking="off">Set Up My Password</a>
+            <p>This link will expire in 1 hour.</p>
+            <p>For security reasons, we recommend setting a strong, unique password.</p>
+        `;
+
+        await sendEmail({
+            to: user.email,
+            subject: 'Set Up Your Password - IceSoft',
+            html: message
+        });
+
+        res.status(200).json({ message: "Password setup link sent successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Error sending setup email", error: error.message });
     }
 };

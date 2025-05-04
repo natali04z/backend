@@ -7,7 +7,7 @@ export const ALL_PERMISSIONS = [
   "create_users", "view_users", "view_users_id", "update_users", "delete_users",
   "view_categories", "view_categories_id", "create_categories", "update_categories", "delete_categories", "update_status_categories",
   "view_providers", "view_providers_id", "create_providers", "update_providers", "delete_providers", "update_status_providers",
-  "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products",
+  "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
   "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "delete_purchases", "update_status_purchases",
   "view_branches", "create_branches", "update_branches", "delete_branches",
   "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers",
@@ -21,7 +21,7 @@ const DEFAULT_PERMISSIONS = {
     "create_users", "view_users", "view_users_id", "update_users", "delete_users", "update_user_status",
     "view_categories", "view_categories_id", "create_categories", "update_categories", "delete_categories", "update_status_categories",
     "view_providers", "view_providers_id", "create_providers", "update_providers", "delete_providers", "update_status_providers",
-    "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products",
+    "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
     "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "delete_purchases", "update_status_purchases",
     "view_branches", "create_branches", "update_branches", "delete_branches", 
     "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers",
@@ -31,13 +31,13 @@ const DEFAULT_PERMISSIONS = {
     "view_roles", "view_users", "view_users_id",
     "view_categories", "view_categories_id","create_categories", "view_customers", "update_status_categories",
     "view_providers", "view_providers_id", "create_providers", "update_providers", "update_status_providers",
-    "view_products", "view_products_id", "create_products", "edit_products", "delete_products",
+    "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
     "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "update_status_purchases",
     "view_customers", "view_customers_id", "create_customers", "update_customers",
     "view_sales", "view_sales_id", "view_sales", "view_sales_id", "create_sales", "update_sales"
   ],
   employee: [
-    "view_categories", "view_products", "view_products_id","create_products", "edit_products", "delete_products", "update_status_products",
+    "view_categories", "view_products", "view_products_id","create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
      "view_customers", "view_sales", "view_customers_id", "create_sales", "update_sales"
   ]
 };

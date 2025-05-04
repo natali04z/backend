@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const PurchaseSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
+    provider: { type: mongoose.Schema.Types.ObjectId, ref: "Provider", required: true },
     products: [{
         product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
         quantity: { type: Number, required: true },

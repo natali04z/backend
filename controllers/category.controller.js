@@ -14,7 +14,7 @@ async function generateCategoryId() {
     return `Ca${nextNumber}`;
 }
 
-// Get all categories
+// Obtener todas las categorías
 export const getCategories = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_categories")) {
@@ -22,7 +22,7 @@ export const getCategories = async (req, res) => {
         }
 
         const categories = await Category.find()
-            .select("id name description status");
+            .select("id name status");
 
         res.status(200).json(categories);
     } catch (error) {
@@ -31,7 +31,7 @@ export const getCategories = async (req, res) => {
     }
 };
 
-// Get category by ID
+// Obtener categoría por ID
 export const getOneCategory = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_categories_id")) {
@@ -45,7 +45,7 @@ export const getOneCategory = async (req, res) => {
         }
 
         const category = await Category.findById(id)
-            .select("id name description status");
+            .select("id name status");
 
         if (!category) {
             return res.status(404).json({ message: "Category not found" });
@@ -58,29 +58,21 @@ export const getOneCategory = async (req, res) => {
     }
 };
 
-// Create a new category
+// Crear una nueva categoría
 export const postCategory = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_categories")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { name, description, status } = req.body;
+        const { name } = req.body;
 
-        if (!name || !description || !status) {
-            return res.status(400).json({ message: "All fields are required" });
+        if (!name) {
+            return res.status(400).json({ message: "Name is required" });
         }
 
         if (name.length < 3 || name.length > 50) {
             return res.status(400).json({ message: "Category name must be between 3 and 50 characters" });
-        }
-
-        if (description.length < 5 || description.length > 200) {
-            return res.status(400).json({ message: "Description must be between 5 and 200 characters" });
-        }
-
-        if (status && !['active', 'inactive'].includes(status)) {
-            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
         const existingCategory = await Category.findOne({ name: name.trim().toLowerCase() });
@@ -92,8 +84,7 @@ export const postCategory = async (req, res) => {
         const newCategory = new Category({
             id,
             name: name.trim(),
-            description,
-            status
+            status: 'active'
         });
 
         await newCategory.save();
@@ -104,7 +95,7 @@ export const postCategory = async (req, res) => {
     }
 };
 
-// Update a category
+// Actualizar una categoría
 export const putCategory = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_categories")) {
@@ -112,7 +103,7 @@ export const putCategory = async (req, res) => {
         }
 
         const { id } = req.params;
-        const { name, description, status } = req.body;
+        const { name } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid category ID" });
@@ -120,14 +111,6 @@ export const putCategory = async (req, res) => {
 
         if (name && (name.length < 3 || name.length > 50)) {
             return res.status(400).json({ message: "Category name must be between 3 and 50 characters" });
-        }
-
-        if (description && (description.length < 5 || description.length > 200)) {
-            return res.status(400).json({ message: "Description must be between 5 and 200 characters" });
-        }
-
-        if (status && !["active", "inactive"].includes(status)) {
-            return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
         if (name) {
@@ -143,14 +126,12 @@ export const putCategory = async (req, res) => {
 
         const updateData = {};
         if (name) updateData.name = name.trim();
-        if (description) updateData.description = description;
-        if (status) updateData.status = status;
 
         const updatedCategory = await Category.findByIdAndUpdate(
             id,
             updateData,
             { new: true, runValidators: true }
-        ).select("id name description status");
+        ).select("id name status");
 
         if (!updatedCategory) {
             return res.status(404).json({ message: "Category not found" });
@@ -163,7 +144,7 @@ export const putCategory = async (req, res) => {
     }
 };
 
-// Update category status
+// Actualizar estado de categoría
 export const updateCategoryStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_categories")) {
@@ -181,11 +162,26 @@ export const updateCategoryStatus = async (req, res) => {
             return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
+        if (status === 'inactive') {
+            const Product = mongoose.model('Product');
+            
+            const activeProductsCount = await Product.countDocuments({ 
+                category: id, 
+                status: 'active' 
+            });
+            
+            if (activeProductsCount > 0) {
+                return res.status(400).json({ 
+                    message: `Cannot deactivate this category. It has ${activeProductsCount} active products associated with it. Please deactivate or reassign these products first.`
+                });
+            }
+        }
+
         const updatedCategory = await Category.findByIdAndUpdate(
             id,
             { status },
             { new: true, runValidators: true }
-        ).select("id name description status");
+        ).select("id name status");
 
         if (!updatedCategory) {
             return res.status(404).json({ message: "Category not found" });
@@ -201,7 +197,7 @@ export const updateCategoryStatus = async (req, res) => {
     }
 };
 
-// Delete a category
+// Eliminar una categoría
 export const deleteCategory = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_categories")) {

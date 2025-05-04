@@ -5,7 +5,8 @@ import {
     postProduct,
     updateProduct,
     deleteProduct,
-    updateProductStatus
+    updateProductStatus,
+    incrementProductStock
 } from "../controllers/product.controller.js";
 
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
@@ -18,5 +19,6 @@ router.post("/", authenticateUser, authorizePermission("create_products"), postP
 router.put("/:id", authenticateUser, authorizePermission("edit_products"), updateProduct);
 router.delete("/:id", authenticateUser, authorizePermission("delete_products"), deleteProduct);
 router.patch("/:id/status", authenticateUser, authorizePermission("update_status_products"), updateProductStatus);
+router.patch("/:id/stock", authenticateUser, authorizePermission("update_stock_products"), incrementProductStock);
 
 export default router;

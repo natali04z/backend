@@ -12,6 +12,33 @@ export const getUsers = async (req, res) => {
     }
 };
 
+// Get own profile
+export const getProfile = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+        
+        let userId;
+        if (req.user._id) {
+            userId = req.user._id;
+        } else if (req.user.id) {
+            userId = req.user.id;
+        } else {
+            return res.status(401).json({ message: "User ID not found in authentication token" });
+        }
+        
+        const user = await User.findById(userId).select("-password").populate("role", "name");
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        res.status(200).json(user);
+    } catch (error) {
+        res.status(500).json({ message: "Error fetching profile", error: error.message });
+    }
+};
+
 // Get user by ID
 export const getOneUser = async (req, res) => {
     try {
@@ -32,6 +59,45 @@ export const getOneUser = async (req, res) => {
     }
 };
 
+// Update own profile
+export const updateProfile = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+        
+        let userId;
+        if (req.user._id) {
+            userId = req.user._id;
+        } else if (req.user.id) {
+            userId = req.user.id;
+        } else {
+            return res.status(401).json({ message: "User ID not found in authentication token" });
+        }
+        
+        const { name, lastname, contact_number, email } = req.body;
+
+        const updateData = { name, lastname, contact_number, email };
+        
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true, runValidators: true }
+        ).select("-password").populate("role", "name");
+        
+        if (!updatedUser) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        res.status(200).json({
+            message: "Profile updated successfully",
+            user: updatedUser
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Error updating profile", error: error.message });
+    }
+};
+
 // Update user
 export const putUser = async (req, res) => {
     try {
@@ -42,12 +108,10 @@ export const putUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid user ID" });
         }
         
-        // Verificar si req.user existe
         if (!req.user) {
             return res.status(401).json({ message: "Authentication required" });
         }
         
-        // Verificar formato del ID del usuario actual
         let currentUserId;
         if (req.user._id) {
             currentUserId = req.user._id.toString ? req.user._id.toString() : String(req.user._id);
@@ -57,27 +121,27 @@ export const putUser = async (req, res) => {
             return res.status(401).json({ message: "User ID not found in authentication token" });
         }
         
-        // Verificar rol de usuario
         let isAdmin = false;
         if (typeof req.user.role === 'string') {
             isAdmin = req.user.role === 'admin';
         } else if (req.user.role && typeof req.user.role === 'object') {
             isAdmin = req.user.role.name === 'admin';
         } else if (req.user.role && req.user.role._id) {
-            // Si role es un ObjectId, necesitamos comparar con el documento Role
             const roleDoc = await Role.findById(req.user.role);
             isAdmin = roleDoc && roleDoc.name === 'admin';
         }
 
-        // Verificación de autorización
         if (currentUserId !== id && !isAdmin) {
             return res.status(403).json({ message: "Unauthorized to edit this user" });
         }
 
         let updateData = { name, lastname, contact_number, email };
 
-        // Verificar si el usuario es admin y quiere cambiar el rol
-        if (isAdmin && role) {
+        if (role && currentUserId === id) {
+            return res.status(403).json({ message: "You cannot update your own role" });
+        }
+
+        if (isAdmin && role && currentUserId !== id) {
             const roleDoc = await Role.findById(role);
             if (!roleDoc) {
                 return res.status(400).json({ message: "Invalid role ID" });
@@ -85,7 +149,6 @@ export const putUser = async (req, res) => {
             updateData.role = role;
         }
 
-        // Solo permitir actualizar el estado si es administrador
         if (isAdmin && status) {
             if (!['active', 'inactive'].includes(status)) {
                 return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
@@ -93,7 +156,6 @@ export const putUser = async (req, res) => {
             updateData.status = status;
         }
 
-        // Evitar que un usuario se desactive a sí mismo
         if (currentUserId === id && status === 'inactive') {
             return res.status(403).json({ message: "You cannot deactivate your own account" });
         }
@@ -128,7 +190,6 @@ export const updateUserStatus = async (req, res) => {
             return res.status(400).json({ message: "Invalid user ID" });
         }
 
-        // Verificar si es administrador
         let isAdmin = false;
         if (typeof req.user.role === 'string') {
             isAdmin = req.user.role === 'admin';
@@ -147,7 +208,6 @@ export const updateUserStatus = async (req, res) => {
             return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
-        // Evitar que un administrador se desactive a sí mismo
         let currentUserId;
         if (req.user._id) {
             currentUserId = req.user._id.toString();
@@ -188,7 +248,6 @@ export const deleteUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid user ID" });
         }
 
-        // Verificar si es administrador
         let isAdmin = false;
         if (typeof req.user.role === 'string') {
             isAdmin = req.user.role === 'admin';
@@ -203,7 +262,6 @@ export const deleteUser = async (req, res) => {
             return res.status(403).json({ message: "Only administrators can delete users" });
         }
 
-        // Evitar que un administrador se elimine a sí mismo
         let currentUserId;
         if (req.user._id) {
             currentUserId = req.user._id.toString();
