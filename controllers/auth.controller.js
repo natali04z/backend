@@ -163,14 +163,15 @@ export const requestPasswordReset = async (req, res) => {
         user.resetPasswordExpires = Date.now() + 3600000; // Token válido por 1 hora
         await user.save();
 
-        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+        // URL correcta apuntando al backend
+        const resetUrl = `https://backend-yy4o.onrender.com/api/reset-password/${resetToken}`;
 
         const message = `
-            <h1>Password Reset Request</h1>
-            <p>Please click on the following link to reset your password:</p>
-            <a href="${resetUrl}" clicktracking="off">Reset My Password</a>
-            <p>This link will expire in 1 hour.</p>
-            <p>If you did not request this reset, please ignore this email.</p>
+        <h1>Solicitud de Restablecimiento de Contraseña</h1>
+        <p>Por favor, haz clic en el siguiente enlace para restablecer tu contraseña:</p>
+        <a href="${resetUrl}" clicktracking="off">Restablecer Mi Contraseña</a>
+        <p>Este enlace caducará en 1 hora.</p>
+        <p>Si no solicitaste este restablecimiento, por favor ignora este correo.</p>
         `;
 
         await sendEmail({
