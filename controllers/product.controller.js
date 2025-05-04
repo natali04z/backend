@@ -42,7 +42,6 @@ function formatProduct(product) {
     return formattedProduct;
 }
 
-// Obtener todos los productos
 export const getProducts = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_products")) {
@@ -62,7 +61,6 @@ export const getProducts = async (req, res) => {
     }
 };
 
-// Obtener producto por ID
 export const getProductById = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_products_id")) {
@@ -92,7 +90,6 @@ export const getProductById = async (req, res) => {
     }
 };
 
-// Crear un nuevo producto
 export const postProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_products")) {
@@ -149,7 +146,6 @@ export const postProduct = async (req, res) => {
             batchDate: batchDateObj,
             expirationDate: expirationDateObj,
             stock: initialStock
-            // El estado "active" se asigna por defecto según el modelo
         });
 
         await newProduct.save();
@@ -166,7 +162,6 @@ export const postProduct = async (req, res) => {
     }
 };
 
-// Actualizar un producto
 export const updateProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "edit_products")) {
@@ -256,7 +251,6 @@ export const updateProduct = async (req, res) => {
     }
 };
 
-// Actualizar estado del producto
 export const updateProductStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_products")) {
@@ -298,7 +292,6 @@ export const updateProductStatus = async (req, res) => {
     }
 };
 
-// Eliminar un producto
 export const deleteProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_products")) {
