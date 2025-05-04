@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { sendEmail } from '../utils/emailService.js';
 
 // Registrar usuario
+// Registrar usuario
 export const registerUser = async (req, res) => {
     try {
         const { name, lastname, contact_number, email, password, role } = req.body;
@@ -48,8 +49,8 @@ export const registerUser = async (req, res) => {
             contact_number,
             email,
             password: hashedPassword,
-            role: roleDoc._id,
-            status: 'active'
+            role: roleDoc._id
+
         });
 
         await newUser.save();
