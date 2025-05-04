@@ -108,6 +108,10 @@ export const putUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid user ID" });
         }
         
+        if (contact_number && !/^\d+$/.test(contact_number)) {
+            return res.status(400).json({ message: "Phone number must contain only digits" });
+        }
+        
         if (!req.user) {
             return res.status(401).json({ message: "Authentication required" });
         }

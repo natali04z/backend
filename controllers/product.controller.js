@@ -15,33 +15,7 @@ async function generateProductId() {
     return `Pr${nextNumber}`;
 }
 
-function formatDate(date) {
-    if (!date) return null;
-    return date.toISOString().split('T')[0];
-}
-
-function formatPrice(price) {
-    return `$${price.toLocaleString('es-CO')}`;
-}
-
-function formatProduct(product) {
-    const formattedProduct = product.toObject ? product.toObject() : { ...product };
-    
-    if (formattedProduct.batchDate) {
-        formattedProduct.batchDate = formatDate(new Date(formattedProduct.batchDate));
-    }
-    
-    if (formattedProduct.expirationDate) {
-        formattedProduct.expirationDate = formatDate(new Date(formattedProduct.expirationDate));
-    }
-    
-    if (formattedProduct.price) {
-        formattedProduct.formattedPrice = formatPrice(formattedProduct.price);
-    }
-    
-    return formattedProduct;
-}
-
+// Get all products
 export const getProducts = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_products")) {
@@ -49,18 +23,17 @@ export const getProducts = async (req, res) => {
         }
 
         const products = await Product.find()
-            .select("id name price stock status category batchDate expirationDate")
+            .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        const formattedProducts = products.map(product => formatProduct(product));
-
-        res.status(200).json(formattedProducts);
+        res.status(200).json(products);
     } catch (error) {
         console.error("Error fetching products:", error);
         res.status(500).json({ message: "Server error" });
     }
 };
 
+// Get product by ID
 export const getProductById = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_products_id")) {
@@ -74,22 +47,21 @@ export const getProductById = async (req, res) => {
         }
 
         const product = await Product.findById(id)
-            .select("id name price stock status category batchDate expirationDate")
+            .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
         if (!product) {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        const formattedProduct = formatProduct(product);
-
-        res.status(200).json(formattedProduct);
+        res.status(200).json(product);
     } catch (error) {
         console.error("Error fetching product:", error);
         res.status(500).json({ message: "Server error" });
     }
 };
 
+// Create product
 export const postProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_products")) {
@@ -97,8 +69,6 @@ export const postProduct = async (req, res) => {
         }
 
         const { name, category, price, batchDate, expirationDate } = req.body;
-        
-        // El stock inicial es 0 (se incrementará con las compras)
         const initialStock = 0;
         
         if (!name || !category || price === undefined || !batchDate || !expirationDate) {
@@ -120,6 +90,10 @@ export const postProduct = async (req, res) => {
 
         if (typeof price !== "number" || price <= 0) {
             return res.status(400).json({ message: "Price must be a positive number" });
+        }
+        
+        if (!Number.isInteger(price)) {
+            return res.status(400).json({ message: "Price must be an integer" });
         }
         
         const batchDateObj = new Date(batchDate);
@@ -150,7 +124,9 @@ export const postProduct = async (req, res) => {
 
         await newProduct.save();
         
-        const savedProduct = formatProduct(newProduct);
+        const savedProduct = await Product.findById(newProduct._id)
+            .select("id name price stock status category batchDate expirationDate formattedPrice")
+            .populate("category", "name");
         
         res.status(201).json({ 
             message: "Product created successfully. Stock starts at 0 and will increase with purchases.", 
@@ -158,10 +134,11 @@ export const postProduct = async (req, res) => {
         });
     } catch (error) {
         console.error("Error creating product:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", error: error.message });
     }
 };
 
+// Update product
 export const updateProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "edit_products")) {
@@ -198,8 +175,14 @@ export const updateProduct = async (req, res) => {
             categoryId = existingCategory._id;
         }
         
-        if (price !== undefined && (typeof price !== "number" || price <= 0)) {
-            return res.status(400).json({ message: "Price must be a positive number" });
+        if (price !== undefined) {
+            if (typeof price !== "number" || price <= 0) {
+                return res.status(400).json({ message: "Price must be a positive number" });
+            }
+            
+            if (!Number.isInteger(price)) {
+                return res.status(400).json({ message: "Price must be an integer" });
+            }
         }
         
         let batchDateObj, expirationDateObj;
@@ -239,18 +222,17 @@ export const updateProduct = async (req, res) => {
             updateData,
             { new: true, runValidators: true }
         )
-            .select("id name price stock status category batchDate expirationDate")
+            .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        const formattedProduct = formatProduct(updatedProduct);
-        
-        res.status(200).json({ message: "Product updated successfully", product: formattedProduct });
+        res.status(200).json({ message: "Product updated successfully", product: updatedProduct });
     } catch (error) {
         console.error("Error updating product:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", error: error.message });
     }
 };
 
+// Update product status
 export const updateProductStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_products")) {
@@ -273,18 +255,16 @@ export const updateProductStatus = async (req, res) => {
             { status },
             { new: true, runValidators: true }
         )
-            .select("id name price stock status category batchDate expirationDate")
+            .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
         if (!updatedProduct) {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        const formattedProduct = formatProduct(updatedProduct);
-
         res.status(200).json({ 
             message: `Product ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
-            product: formattedProduct 
+            product: updatedProduct 
         });
     } catch (error) {
         console.error("Error updating product status:", error);
@@ -292,6 +272,7 @@ export const updateProductStatus = async (req, res) => {
     }
 };
 
+// Delete product
 export const deleteProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_products")) {

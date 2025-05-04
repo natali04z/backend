@@ -69,7 +69,15 @@ export const postProvider = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        if (!/^\d{10,}$/.test(contact_phone)) {
+        if (!/^\d+$/.test(nit)) {
+            return res.status(400).json({ message: "NIT must contain only digits" });
+        }
+
+        if (!/^\d+$/.test(contact_phone)) {
+            return res.status(400).json({ message: "Contact phone must contain only digits" });
+        }
+
+        if (contact_phone.length < 10) {
             return res.status(400).json({ message: "Contact phone must be at least 10 digits" });
         }
 
@@ -123,7 +131,15 @@ export const putProvider = async (req, res) => {
             return res.status(400).json({ message: "Name cannot be empty" });
         }
 
-        if (contact_phone && !/^\d{10,}$/.test(contact_phone)) {
+        if (nit && !/^\d+$/.test(nit)) {
+            return res.status(400).json({ message: "NIT must contain only digits" });
+        }
+
+        if (contact_phone && !/^\d+$/.test(contact_phone)) {
+            return res.status(400).json({ message: "Contact phone must contain only digits" });
+        }
+
+        if (contact_phone && contact_phone.length < 10) {
             return res.status(400).json({ message: "Contact phone must be at least 10 digits" });
         }
 

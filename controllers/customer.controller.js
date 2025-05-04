@@ -2,7 +2,6 @@ import Customer from "../models/customer.js";
 import mongoose from "mongoose";
 import { checkPermission } from "../utils/permissions.js";
 
-// Función para formatear la fecha
 const formatDate = (date) => {
   if (!date) return null;
   return new Date(date).toLocaleDateString('es-ES', {
@@ -18,11 +17,12 @@ export const getCustomers = async (req, res) => {
         if (!checkPermission(req.user.role, "view_customers")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
+        
+        await Customer.getDefaultCustomer();
 
         const customers = await Customer.find()
-            .select("name lastname email phone status createdAt");
+            .select("name lastname email phone status createdAt isDefault");
 
-        // Formatear fechas en la respuesta
         const formattedCustomers = customers.map(customer => ({
             id: customer._id,
             name: customer.name,
@@ -30,6 +30,7 @@ export const getCustomers = async (req, res) => {
             email: customer.email,
             phone: customer.phone,
             status: customer.status,
+            isDefault: customer.isDefault,
             createdAt: formatDate(customer.createdAt)
         }));
 
@@ -54,7 +55,7 @@ export const getCustomerById = async (req, res) => {
         }
 
         const customer = await Customer.findById(id)
-            .select("id name lastname email phone status createdAt");
+            .select("id name lastname email phone status createdAt isDefault");
 
         if (!customer) {
             return res.status(404).json({ message: "Customer not found" });
@@ -67,12 +68,40 @@ export const getCustomerById = async (req, res) => {
             email: customer.email,
             phone: customer.phone,
             status: customer.status,
+            isDefault: customer.isDefault,
             createdAt: formatDate(customer.createdAt)
         };
 
         res.status(200).json(formattedCustomer);
     } catch (error) {
         console.error("Error fetching customer:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+// Obtener cliente predeterminado
+export const getDefaultCustomer = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "view_customers")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const defaultCustomer = await Customer.getDefaultCustomer();
+
+        const formattedCustomer = {
+            id: defaultCustomer._id,
+            name: defaultCustomer.name,
+            lastname: defaultCustomer.lastname,
+            email: defaultCustomer.email,
+            phone: defaultCustomer.phone,
+            status: defaultCustomer.status,
+            isDefault: defaultCustomer.isDefault,
+            createdAt: formatDate(defaultCustomer.createdAt)
+        };
+
+        res.status(200).json(formattedCustomer);
+    } catch (error) {
+        console.error("Error fetching default customer:", error);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -84,28 +113,24 @@ export const createCustomer = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { name, lastname, email, phone, status } = req.body;
+        const { name, lastname, email, phone, isDefault } = req.body;
 
-        // Validar campos obligatorios
         if (!name || !lastname || !email || !phone) {
             return res.status(400).json({ message: "Name, lastname, email, and phone are required" });
         }
 
-        // Validar formato de email
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             return res.status(400).json({ message: "Invalid email format" });
         }
 
-        // Verificar si el email ya existe
+        if (!/^\d+$/.test(phone)) {
+            return res.status(400).json({ message: "Phone number must contain only digits" });
+        }
+
         const existingCustomer = await Customer.findOne({ email });
         if (existingCustomer) {
             return res.status(400).json({ message: "Customer with this email already exists" });
-        }
-
-        // Validar estado si se proporciona
-        if (status && !['active', 'inactive'].includes(status)) {
-            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
         }
 
         const newCustomer = new Customer({
@@ -113,7 +138,7 @@ export const createCustomer = async (req, res) => {
             lastname,
             email,
             phone,
-            status: status || 'active',
+            isDefault: isDefault || false,
             createdAt: new Date(),
         });
 
@@ -127,6 +152,7 @@ export const createCustomer = async (req, res) => {
                 email: newCustomer.email,
                 phone: newCustomer.phone,
                 status: newCustomer.status,
+                isDefault: newCustomer.isDefault,
                 createdAt: formatDate(newCustomer.createdAt),
             }
         });
@@ -144,34 +170,38 @@ export const updateCustomer = async (req, res) => {
         }
 
         const { id } = req.params;
-        const { name, lastname, email, phone, status } = req.body;
+        const { name, lastname, email, phone, isDefault } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid customer ID" });
         }
 
-        // Validar email si se proporciona
+        if (phone && !/^\d+$/.test(phone)) {
+            return res.status(400).json({ message: "Phone number must contain only digits" });
+        }
+
         if (email) {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(email)) {
                 return res.status(400).json({ message: "Invalid email format" });
             }
 
-            // Verificar si otro cliente ya tiene este email
             const existingCustomer = await Customer.findOne({ email, _id: { $ne: id } });
             if (existingCustomer) {
                 return res.status(400).json({ message: "Email already in use by another customer" });
             }
         }
 
-        // Validar estado si se proporciona
-        if (status && !['active', 'inactive'].includes(status)) {
-            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
-        }
+        const updateData = {};
+        if (name) updateData.name = name;
+        if (lastname) updateData.lastname = lastname;
+        if (email) updateData.email = email;
+        if (phone) updateData.phone = phone;
+        if (isDefault !== undefined) updateData.isDefault = isDefault;
 
         const updatedCustomer = await Customer.findByIdAndUpdate(
             id,
-            { name, lastname, email, phone, status },
+            updateData,
             { new: true, runValidators: true }
         );
 
@@ -188,6 +218,7 @@ export const updateCustomer = async (req, res) => {
                 email: updatedCustomer.email,
                 phone: updatedCustomer.phone,
                 status: updatedCustomer.status,
+                isDefault: updatedCustomer.isDefault,
                 createdAt: formatDate(updatedCustomer.createdAt),
             }
         });
@@ -208,6 +239,11 @@ export const deleteCustomer = async (req, res) => {
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid customer ID" });
+        }
+
+        const customer = await Customer.findById(id);
+        if (customer && customer.isDefault) {
+            return res.status(400).json({ message: "Default customer cannot be deleted" });
         }
 
         const deletedCustomer = await Customer.findByIdAndDelete(id);
@@ -237,6 +273,11 @@ export const updateCustomerStatus = async (req, res) => {
             return res.status(400).json({ message: "Invalid customer ID" });
         }
 
+        const customer = await Customer.findById(id);
+        if (customer && customer.isDefault && status === 'inactive') {
+            return res.status(400).json({ message: "Default customer cannot be deactivated" });
+        }
+
         if (!status || !['active', 'inactive'].includes(status)) {
             return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
         }
@@ -260,6 +301,7 @@ export const updateCustomerStatus = async (req, res) => {
                 email: updatedCustomer.email,
                 phone: updatedCustomer.phone,
                 status: updatedCustomer.status,
+                isDefault: updatedCustomer.isDefault,
                 createdAt: formatDate(updatedCustomer.createdAt),
             }
         });

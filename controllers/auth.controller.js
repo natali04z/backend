@@ -6,13 +6,17 @@ import crypto from 'crypto';
 import { sendEmail } from '../utils/emailService.js';
 
 // Registrar usuario
-// Registrar usuario
 export const registerUser = async (req, res) => {
     try {
         const { name, lastname, contact_number, email, password, role } = req.body;
 
         if (!name || !lastname || !contact_number || !email || !password || !role) {
             return res.status(400).json({ message: "All fields are required" });
+        }
+
+        // Validación para que contact_number solo contenga números
+        if (!/^\d+$/.test(contact_number)) {
+            return res.status(400).json({ message: "Phone number must contain only digits" });
         }
 
         const existingUser = await User.findOne({ email });
@@ -50,7 +54,6 @@ export const registerUser = async (req, res) => {
             email,
             password: hashedPassword,
             role: roleDoc._id
-
         });
 
         await newUser.save();
