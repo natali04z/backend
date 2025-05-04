@@ -22,8 +22,8 @@ router.post("/reset-password/:token", resetPassword);
 router.post("/request-password-setup", authenticateUser, requestPasswordSetup);
 
 // Ruta para servir la página de restablecimiento de contraseña
-router.get("/reset-password/:token", (req, res) => {
-  res.sendFile(path.resolve(process.cwd(), 'public', 'reset-password.html'));
-});
+router.get("/auth/reset-password/:token", (req, res) => {
+    res.sendFile(path.resolve(process.cwd(), 'public', 'reset-password.html'));
+  });
 
 export default router;

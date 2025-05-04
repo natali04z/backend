@@ -160,11 +160,10 @@ export const requestPasswordReset = async (req, res) => {
         const resetToken = crypto.randomBytes(32).toString('hex');
         
         user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-        user.resetPasswordExpires = Date.now() + 3600000; // Token válido por 1 hora
+        user.resetPasswordExpires = Date.now() + 3600000;
         await user.save();
 
-        // URL correcta apuntando al backend
-        const resetUrl = `https://backend-yy4o.onrender.com/api/reset-password/${resetToken}`;
+        const resetUrl = `https://backend-yy4o.onrender.com/api/auth/reset-password/${resetToken}`;
 
         const message = `
         <h1>Solicitud de Restablecimiento de Contraseña</h1>
@@ -176,7 +175,7 @@ export const requestPasswordReset = async (req, res) => {
 
         await sendEmail({
             to: user.email,
-            subject: 'Password Reset Request',
+            subject: 'Solicitud de Restablecimiento de Contraseña',
             html: message
         });
 
