@@ -4,7 +4,8 @@ import {
     getCustomerById,
     createCustomer,
     updateCustomer,
-    deleteCustomer
+    deleteCustomer,
+    updateCustomerStatus
 } from "../controllers/customer.controller.js";
 
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
@@ -16,5 +17,6 @@ router.get("/:id", authenticateUser, authorizePermission("view_customers_id"), g
 router.post("/", authenticateUser, authorizePermission("create_customers"), createCustomer);
 router.put("/:id", authenticateUser, authorizePermission("update_customers"), updateCustomer);
 router.delete("/:id", authenticateUser, authorizePermission("delete_customers"), deleteCustomer);
+router.patch("/:id/status", authenticateUser, authorizePermission("update_customers_status"), updateCustomerStatus);
 
 export default router;

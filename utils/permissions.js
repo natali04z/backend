@@ -10,7 +10,7 @@ export const ALL_PERMISSIONS = [
   "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
   "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "delete_purchases", "update_status_purchases",
   "view_branches", "create_branches", "update_branches", "delete_branches",
-  "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers",
+  "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers", "update_customers_status",
   "view_sales", "view_sales_id", "create_sales", "update_sales", "delete_sales"
 ];
 
@@ -24,7 +24,7 @@ const DEFAULT_PERMISSIONS = {
     "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
     "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "delete_purchases", "update_status_purchases",
     "view_branches", "create_branches", "update_branches", "delete_branches", 
-    "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers",
+    "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers", "update_customers_status",
     "view_sales", "view_sales_id", "create_sales", "update_sales", "delete_sales"
   ],
   assistant: [
