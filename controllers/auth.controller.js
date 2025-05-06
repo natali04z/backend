@@ -2,8 +2,6 @@ import User from "../models/user.js";
 import Role from "../models/role.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import crypto from 'crypto';
-import { sendEmail } from '../utils/emailService.js';
 
 // Registrar usuario
 export const registerUser = async (req, res) => {
