@@ -144,9 +144,8 @@ export const getAuthenticatedUser = async (req, res) => {
     }
 };
 
-// Solicitar restablecimiento de contraseña
-export const requestPasswordReset = async (req, res) => {
-    let user;
+// Verificar si el correo existe en el sistema
+export const verifyEmail = async (req, res) => {
     try {
         const { email } = req.body;
 
@@ -154,114 +153,51 @@ export const requestPasswordReset = async (req, res) => {
             return res.status(400).json({ message: "Email is required" });
         }
 
-        user = await User.findOne({ email });
+        // Verificar si el usuario existe en el sistema
+        const user = await User.findOne({ email });
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        
-        user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-        user.resetPasswordExpires = Date.now() + 3600000;
-        await user.save();
-
-        const resetUrl = `https://backend-yy4o.onrender.com/api/auth/reset-password/${resetToken}`;
-
-        const message = `
-        <h1>Solicitud de Restablecimiento de Contraseña</h1>
-        <p>Por favor, haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-        <a href="${resetUrl}" clicktracking="off">Restablecer Mi Contraseña</a>
-        <p>Este enlace caducará en 1 hora.</p>
-        <p>Si no solicitaste este restablecimiento, por favor ignora este correo.</p>
-        `;
-
-        await sendEmail({
-            to: user.email,
-            subject: 'Solicitud de Restablecimiento de Contraseña',
-            html: message
+        // Si el usuario existe, enviar respuesta exitosa
+        res.status(200).json({ 
+            message: "Email verified successfully",
+            userId: user._id // Opcional: enviar el ID del usuario para usarlo en el siguiente paso
         });
-
-        res.status(200).json({ message: "Password reset email sent successfully" });
     } catch (error) {
-        if (user) {
-            user.resetPasswordToken = undefined;
-            user.resetPasswordExpires = undefined;
-            await user.save();
-        }
-
-        res.status(500).json({ message: "Error sending reset email", error: error.message });
+        res.status(500).json({ message: "Error verifying email", error: error.message });
     }
 };
 
-// Restablecer contraseña con token
+// Restablecer contraseña después de verificar el correo
 export const resetPassword = async (req, res) => {
     try {
-        const { token } = req.params;
-        const { newPassword } = req.body;
+        const { email, newPassword } = req.body;
 
-        if (!token || !newPassword) {
-            return res.status(400).json({ message: "Token and new password are required" });
+        if (!email || !newPassword) {
+            return res.status(400).json({ message: "Email and new password are required" });
         }
 
-        const resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
-
-        const user = await User.findOne({
-            resetPasswordToken,
-            resetPasswordExpires: { $gt: Date.now() }
-        });
+        // Buscar al usuario nuevamente
+        const user = await User.findOne({ email });
 
         if (!user) {
-            return res.status(400).json({ message: "Invalid or expired token" });
+            return res.status(404).json({ message: "User not found" });
         }
 
+        // Actualizar la contraseña
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         user.password = hashedPassword;
+        
+        // Limpiar cualquier token de restablecimiento existente
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
+        
         await user.save();
 
         res.status(200).json({ message: "Password changed successfully" });
     } catch (error) {
         res.status(500).json({ message: "Error changing password", error: error.message });
-    }
-};
-
-// Solicitar enlace para configurar contraseña después del primer inicio de sesión
-export const requestPasswordSetup = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        const setupToken = crypto.randomBytes(32).toString('hex');
-        
-        user.resetPasswordToken = crypto.createHash('sha256').update(setupToken).digest('hex');
-        user.resetPasswordExpires = Date.now() + 3600000;
-        await user.save();
-
-        const setupUrl = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
-
-        const message = `
-            <h1>Set Your Password - IceSoft</h1>
-            <p>Hello ${user.name},</p>
-            <p>Please click on the following link to set up your password:</p>
-            <a href="${setupUrl}" clicktracking="off">Set Up My Password</a>
-            <p>This link will expire in 1 hour.</p>
-            <p>For security reasons, we recommend setting a strong, unique password.</p>
-        `;
-
-        await sendEmail({
-            to: user.email,
-            subject: 'Set Up Your Password - IceSoft',
-            html: message
-        });
-
-        res.status(200).json({ message: "Password setup link sent successfully" });
-    } catch (error) {
-        res.status(500).json({ message: "Error sending setup email", error: error.message });
     }
 };
