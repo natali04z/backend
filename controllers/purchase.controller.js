@@ -172,8 +172,10 @@ export const postPurchase = async (req, res) => {
             
             total += itemTotal;
 
-            // Incrementar el stock del producto
-            await foundProduct.incrementStock(item.cantidad);
+            // Incrementar el stock del producto solo si el estado es active
+            if (estado === "active") {
+                await foundProduct.incrementStock(item.cantidad);
+            }
         }
 
         // Generar ID único
@@ -227,6 +229,12 @@ export const updatePurchase = async (req, res) => {
             return res.status(400).json({ message: "Error de validación", errors: validationErrors });
         }
 
+        // Obtener la compra actual para verificar si cambia el estado
+        const currentPurchase = await Purchase.findById(id);
+        if (!currentPurchase) {
+            return res.status(404).json({ message: "Compra no encontrada" });
+        }
+
         let updateFields = {};
 
         // Verificar los campos a actualizar
@@ -239,7 +247,38 @@ export const updatePurchase = async (req, res) => {
         }
 
         if (fecha_compra !== undefined) updateFields.fecha_compra = fecha_compra;
-        if (estado !== undefined) updateFields.estado = estado;
+        
+        // Manejar cambio de estado y actualización de stock si es necesario
+        if (estado !== undefined) {
+            if (currentPurchase.estado !== estado) {
+                // Si cambia de activo a inactivo
+                if (currentPurchase.estado === "active" && estado === "inactive") {
+                    for (const item of currentPurchase.productos) {
+                        const product = await Product.findById(item.producto);
+                        if (product) {
+                            if (product.stock >= item.cantidad) {
+                                await product.decrementStock(item.cantidad);
+                            } else {
+                                return res.status(400).json({
+                                    message: "No se puede desactivar la compra porque el producto ya no tiene suficiente stock disponible",
+                                    product: product.name
+                                });
+                            }
+                        }
+                    }
+                } 
+                // Si cambia de inactivo a activo
+                else if (currentPurchase.estado === "inactive" && estado === "active") {
+                    for (const item of currentPurchase.productos) {
+                        const product = await Product.findById(item.producto);
+                        if (product) {
+                            await product.incrementStock(item.cantidad);
+                        }
+                    }
+                }
+            }
+            updateFields.estado = estado;
+        }
         
         if (Object.keys(updateFields).length === 0) {
             return res.status(400).json({ message: "No hay campos válidos para actualizar" });
@@ -252,10 +291,6 @@ export const updatePurchase = async (req, res) => {
         })
             .populate("proveedor", "name")
             .populate("productos.producto", "name price");
-
-        if (!updatedPurchase) {
-            return res.status(404).json({ message: "Compra no encontrada" });
-        }
 
         const formattedPurchase = updatedPurchase.toObject();
         
@@ -294,6 +329,43 @@ export const updatePurchaseStatus = async (req, res) => {
             return res.status(400).json({ message: "El estado debe ser 'active' o 'inactive'" });
         }
 
+        // Obtener la compra actual para verificar su estado previo
+        const currentPurchase = await Purchase.findById(id);
+        
+        if (!currentPurchase) {
+            return res.status(404).json({ message: "Compra no encontrada" });
+        }
+        
+        // Solo actualizar el stock si el estado está cambiando
+        if (currentPurchase.estado !== estado) {
+            // Si está pasando de active a inactive, decrementar el stock
+            if (currentPurchase.estado === "active" && estado === "inactive") {
+                for (const item of currentPurchase.productos) {
+                    const product = await Product.findById(item.producto);
+                    if (product) {
+                        if (product.stock >= item.cantidad) {
+                            await product.decrementStock(item.cantidad);
+                        } else {
+                            return res.status(400).json({
+                                message: "No se puede desactivar la compra porque el producto ya no tiene suficiente stock disponible",
+                                product: product.name
+                            });
+                        }
+                    }
+                }
+            } 
+            // Si está pasando de inactive a active, incrementar el stock
+            else if (currentPurchase.estado === "inactive" && estado === "active") {
+                for (const item of currentPurchase.productos) {
+                    const product = await Product.findById(item.producto);
+                    if (product) {
+                        await product.incrementStock(item.cantidad);
+                    }
+                }
+            }
+        }
+
+        // Actualizar el estado de la compra
         const updatedPurchase = await Purchase.findByIdAndUpdate(
             id,
             { estado },
@@ -302,10 +374,6 @@ export const updatePurchaseStatus = async (req, res) => {
             .populate("proveedor", "name")
             .populate("productos.producto", "name price");
 
-        if (!updatedPurchase) {
-            return res.status(404).json({ message: "Compra no encontrada" });
-        }
-
         const formattedPurchase = updatedPurchase.toObject();
         
         if (formattedPurchase.fecha_compra) {
@@ -313,7 +381,7 @@ export const updatePurchaseStatus = async (req, res) => {
         }
 
         res.status(200).json({ 
-            message: `Compra ${estado === 'active' ? 'activada' : 'desactivada'} exitosamente`, 
+            message: `Compra ${estado === 'active' ? 'activada' : 'desactivada'} exitosamente y stock actualizado`, 
             purchase: formattedPurchase 
         });
     } catch (error) {
@@ -343,7 +411,7 @@ export const deletePurchase = async (req, res) => {
         }
         
         // Revertir los incrementos de stock realizados en la compra
-        if (purchaseToDelete.productos && Array.isArray(purchaseToDelete.productos)) {
+        if (purchaseToDelete.estado === "active" && purchaseToDelete.productos && Array.isArray(purchaseToDelete.productos)) {
             for (const item of purchaseToDelete.productos) {
                 const product = await Product.findById(item.producto);
                 if (product) {
@@ -452,17 +520,26 @@ export const exportPurchaseToPdf = async (req, res) => {
                 { header: "ID", key: "id", width: 80 },
                 { header: "Fecha", key: "fecha_compra", width: 100, type: "date" },
                 { header: "Proveedor", key: "proveedorName", width: 150 },
-                { header: "Productos", key: "productoCount", width: 100 },
+                { header: "Productos (Cantidad)", key: "productosDetalle", width: 200 },
                 { header: "Total", key: "total", width: 120, align: "right", type: "currency" },
                 { header: "Estado", key: "estado", width: 80 }
             ],
             formatData: (purchase) => {
+                // Formatear productos con cantidades
+                let productosDetalle = "Sin productos";
+                if (purchase.productos && purchase.productos.length > 0) {
+                    productosDetalle = purchase.productos.map(item => {
+                        const productName = item.producto?.name || "Producto desconocido";
+                        return `${productName} (${item.cantidad})`;
+                    }).join(", ");
+                }
+                
                 // Formatear datos de cada fila
                 return {
                     id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
                     fecha_compra: purchase.fecha_compra ? new Date(purchase.fecha_compra) : null,
                     proveedorName: purchase.proveedor?.name || "Desconocido",
-                    productoCount: purchase.productos?.length || 0,
+                    productosDetalle: productosDetalle,
                     total: purchase.total || 0,
                     estado: purchase.estado || "N/A"
                 };
@@ -585,17 +662,26 @@ export const exportPurchaseToExcel = async (req, res) => {
                 { header: "ID", key: "id", width: 15 },
                 { header: "Fecha", key: "fecha_compra", width: 15, type: "date" },
                 { header: "Proveedor", key: "proveedorName", width: 30 },
-                { header: "Productos", key: "productoCount", width: 15 },
+                { header: "Productos (Cantidad)", key: "productosDetalle", width: 50 },
                 { header: "Total", key: "total", width: 20, align: "right", type: "currency" },
                 { header: "Estado", key: "estado", width: 15 }
             ],
             formatData: (purchase) => {
+                // Formatear productos con cantidades
+                let productosDetalle = "Sin productos";
+                if (purchase.productos && purchase.productos.length > 0) {
+                    productosDetalle = purchase.productos.map(item => {
+                        const productName = item.producto?.name || "Producto desconocido";
+                        return `${productName} (${item.cantidad})`;
+                    }).join(", ");
+                }
+                
                 // Formatear datos de cada fila
                 return {
                     id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
                     fecha_compra: purchase.fecha_compra ? new Date(purchase.fecha_compra) : null,
                     proveedorName: purchase.proveedor?.name || "Desconocido",
-                    productoCount: purchase.productos?.length || 0,
+                    productosDetalle: productosDetalle,
                     total: purchase.total || 0,
                     estado: purchase.estado || "N/A"
                 };
