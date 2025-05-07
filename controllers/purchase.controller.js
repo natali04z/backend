@@ -63,7 +63,7 @@ export const getPurchases = async (req, res) => {
 
         console.log("Executing purchase query");
         const purchases = await Purchase.find()
-            .populate("provider", "name")
+            .populate("provider", "company")
             .populate("products.product", "name price");
         console.log(`Found ${purchases.length} purchases`);
 
