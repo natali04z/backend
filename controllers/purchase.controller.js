@@ -20,62 +20,69 @@ function validatePurchaseData(data, isUpdate = false) {
     const errors = [];
     
     if (!isUpdate) {
-        if (!data.productos || !Array.isArray(data.productos) || data.productos.length === 0) {
-            errors.push("Al menos un producto es requerido");
+        if (!data.products || !Array.isArray(data.products) || data.products.length === 0) {
+            errors.push("At least one product is required");
         }
-        if (!data.proveedor) errors.push("El proveedor es requerido");
+        if (!data.provider) errors.push("Provider is required");
     }
     
-    if (data.proveedor && !mongoose.Types.ObjectId.isValid(data.proveedor)) {
-        errors.push("Formato de ID de proveedor inválido");
+    if (data.provider && !mongoose.Types.ObjectId.isValid(data.provider)) {
+        errors.push("Invalid provider ID format");
     }
     
-    if (data.productos && Array.isArray(data.productos)) {
-        data.productos.forEach((item, index) => {
-            if (!item.producto || !mongoose.Types.ObjectId.isValid(item.producto)) {
-                errors.push(`Producto inválido en la posición ${index}`);
+    if (data.products && Array.isArray(data.products)) {
+        data.products.forEach((item, index) => {
+            if (!item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
+                errors.push(`Invalid product at index ${index}`);
             }
-            if (typeof item.cantidad !== 'number' || item.cantidad <= 0) {
-                errors.push(`Cantidad inválida en la posición ${index}`);
+            if (typeof item.quantity !== 'number' || !Number.isInteger(item.quantity) || item.quantity <= 0) {
+                errors.push(`Invalid quantity at index ${index}. Must be a positive integer`);
             }
-            if (typeof item.precio_compra !== 'number' || item.precio_compra <= 0) {
-                errors.push(`Precio de compra inválido en la posición ${index}`);
+            if (typeof item.purchase_price !== 'number' || item.purchase_price <= 0) {
+                errors.push(`Invalid purchase price at index ${index}. Must be a positive number`);
             }
         });
     }
     
-    if (data.fecha_compra !== undefined) {
+    if (data.purchase_date !== undefined) {
         const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z)?$/;
-        if (!dateRegex.test(data.fecha_compra) && !(data.fecha_compra instanceof Date)) {
-            errors.push("Formato de fecha inválido. Use YYYY-MM-DD o formato ISO");
+        if (!dateRegex.test(data.purchase_date) && !(data.purchase_date instanceof Date)) {
+            errors.push("Invalid date format. Use YYYY-MM-DD or ISO format");
         }
-    }
-    
-    if (data.estado !== undefined && !["active", "inactive"].includes(data.estado)) {
-        errors.push("El estado debe ser 'active' o 'inactive'");
     }
     
     return errors;
 }
 
-// GET: Obtener todas las compras
+// GET: Retrieve all purchases
 export const getPurchases = async (req, res) => {
     try {        
         if (!req.user || !checkPermission(req.user.role, "view_purchases")) {
-            return res.status(403).json({ message: "Acceso no autorizado" });
+            return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        console.log("Ejecutando consulta de compras");
+        console.log("Executing purchase query");
         const purchases = await Purchase.find()
-            .populate("proveedor", "name")
-            .populate("productos.producto", "name price");
-        console.log(`Encontradas ${purchases.length} compras`);
+            .populate("provider", "name")
+            .populate("products.product", "name price");
+        console.log(`Found ${purchases.length} purchases`);
 
         const formattedPurchases = purchases.map(purchase => {
             const purchaseObj = purchase.toObject();
             
-            if (purchaseObj.fecha_compra) {
-                purchaseObj.fecha_compra = new Date(purchaseObj.fecha_compra).toISOString().split('T')[0];
+            if (purchaseObj.purchase_date) {
+                purchaseObj.purchase_date = new Date(purchaseObj.purchase_date).toISOString().split('T')[0];
+            }
+            
+            // Ensure quantity is included for each product
+            if (purchaseObj.products && Array.isArray(purchaseObj.products)) {
+                purchaseObj.products = purchaseObj.products.map(item => {
+                    // Explicitly include quantity in the response
+                    return {
+                        ...item,
+                        quantity: item.quantity || 0
+                    };
+                });
             }
             
             return purchaseObj;
@@ -83,344 +90,321 @@ export const getPurchases = async (req, res) => {
 
         res.status(200).json(formattedPurchases);
     } catch (error) {
-        console.error("Error al obtener compras:", error);
-        res.status(500).json({ message: "Error del servidor", details: error.message });
+        console.error("Error fetching purchases:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// GET: Obtener una compra por ID
+// GET: Retrieve a single purchase by ID
 export const getPurchaseById = async (req, res) => {
     try {
         if (!req.user || !checkPermission(req.user.role, "view_purchases_id")) {
-            return res.status(403).json({ message: "Acceso no autorizado" });
+            return res.status(403).json({ message: "Unauthorized access" });
         }
 
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Formato de ID de compra inválido" });
+            return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
         const purchase = await Purchase.findById(id)
-            .populate("proveedor", "name")
-            .populate("productos.producto", "name price");
+            .populate("provider", "name")
+            .populate("products.product", "name price");
 
         if (!purchase) {
-            return res.status(404).json({ message: "Compra no encontrada" });
+            return res.status(404).json({ message: "Purchase not found" });
         }
 
         const formattedPurchase = purchase.toObject();
         
-        if (formattedPurchase.fecha_compra) {
-            formattedPurchase.fecha_compra = new Date(formattedPurchase.fecha_compra).toISOString().split('T')[0];
+        if (formattedPurchase.purchase_date) {
+            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+        }
+        
+        // Ensure quantity is included for each product
+        if (formattedPurchase.products && Array.isArray(formattedPurchase.products)) {
+            formattedPurchase.products = formattedPurchase.products.map(item => {
+                // Explicitly include quantity in the response
+                return {
+                    ...item,
+                    quantity: item.quantity || 0
+                };
+            });
         }
 
         res.status(200).json(formattedPurchase);
     } catch (error) {
-        console.error("Error al obtener compra:", error);
-        res.status(500).json({ message: "Error del servidor", details: error.message });
+        console.error("Error fetching purchase:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// POST: Crear nueva compra
+// POST: Create new purchase
 export const postPurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_purchases")) {
-            return res.status(403).json({ message: "Acceso no autorizado" });
+            return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { productos, proveedor, fecha_compra, estado = "active" } = req.body;
+        const { products, provider, purchase_date } = req.body;
+        // Status is active by default in the model
 
-        // Validación de datos
+        // Data validation
         const validationErrors = validatePurchaseData(req.body);
         if (validationErrors.length > 0) {
-            return res.status(400).json({ message: "Error de validación", errors: validationErrors });
+            return res.status(400).json({ message: "Validation error", errors: validationErrors });
         }
 
-        // Verificar proveedor
-        const proveedorExistente = await Provider.findById(proveedor);
-        if (!proveedorExistente) {
-            return res.status(404).json({ message: "Proveedor no encontrado" });
+        // Verify provider
+        const existingProvider = await Provider.findById(provider);
+        if (!existingProvider) {
+            return res.status(404).json({ message: "Provider not found" });
         }
 
-        // Procesar productos
+        // Process products
         let total = 0;
-        let productosValidados = [];
+        let validatedProducts = [];
 
-        for (let i = 0; i < productos.length; i++) {
-            const item = productos[i];
+        for (let i = 0; i < products.length; i++) {
+            const item = products[i];
             
-            // Verificar producto
-            const foundProduct = await Product.findById(item.producto);
+            // Verify product
+            const foundProduct = await Product.findById(item.product);
             if (!foundProduct) {
-                return res.status(404).json({ message: `Producto no encontrado en el índice ${i}` });
+                return res.status(404).json({ message: `Product not found at index ${i}` });
             }
 
             if (foundProduct.status !== "active") {
-                return res.status(400).json({ message: `No se puede usar un producto inactivo en el índice ${i}` });
+                return res.status(400).json({ message: `Cannot use inactive product at index ${i}` });
             }
 
-            // Calcular total
-            const itemTotal = item.precio_compra * item.cantidad;
+            // Calculate total
+            const itemTotal = item.purchase_price * item.quantity;
             
-            productosValidados.push({
-                producto: item.producto,
-                cantidad: item.cantidad,
-                precio_compra: item.precio_compra,
+            validatedProducts.push({
+                product: item.product,
+                quantity: item.quantity,
+                purchase_price: item.purchase_price,
                 total: itemTotal
             });
             
             total += itemTotal;
 
-            // Incrementar el stock del producto solo si el estado es active
-            if (estado === "active") {
-                await foundProduct.incrementStock(item.cantidad);
-            }
+            // Increment product stock - purchases are active by default
+            await foundProduct.incrementStock(item.quantity);
         }
 
-        // Generar ID único
+        // Generate unique ID
         const id = await generatePurchaseId();
 
-        // Crear nueva compra
+        // Create new purchase
         const newPurchase = new Purchase({
             id,
-            proveedor,
-            productos: productosValidados,
-            fecha_compra: fecha_compra || new Date(),
-            total,
-            estado
+            provider,
+            products: validatedProducts,
+            purchase_date: purchase_date || new Date(),
+            total
+            // Status is active by default in the model
         });
 
         await newPurchase.save();
 
         const formattedPurchase = newPurchase.toObject();
         
-        if (formattedPurchase.fecha_compra) {
-            formattedPurchase.fecha_compra = new Date(formattedPurchase.fecha_compra).toISOString().split('T')[0];
+        if (formattedPurchase.purchase_date) {
+            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
         }
 
         res.status(201).json({ 
-            message: "Compra creada exitosamente y stock de productos actualizado", 
+            message: "Purchase created successfully and product stock updated", 
             purchase: formattedPurchase 
         });
     } catch (error) {
-        console.error("Error al crear compra:", error);
-        res.status(500).json({ message: "Error del servidor", details: error.message });
+        console.error("Error creating purchase:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// PUT: Actualizar una compra existente
+// PUT: Update an existing purchase
 export const updatePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_purchases")) {
-            return res.status(403).json({ message: "Acceso no autorizado" });
+            return res.status(403).json({ message: "Unauthorized access" });
         }
 
         const { id } = req.params;
-        const { proveedor, fecha_compra, estado } = req.body;
+        const { provider, purchase_date } = req.body;
+        // Status is handled in its own dedicated method
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Formato de ID de compra inválido" });
+            return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Validación de datos
+        // Data validation
         const validationErrors = validatePurchaseData(req.body, true);
         if (validationErrors.length > 0) {
-            return res.status(400).json({ message: "Error de validación", errors: validationErrors });
-        }
-
-        // Obtener la compra actual para verificar si cambia el estado
-        const currentPurchase = await Purchase.findById(id);
-        if (!currentPurchase) {
-            return res.status(404).json({ message: "Compra no encontrada" });
+            return res.status(400).json({ message: "Validation error", errors: validationErrors });
         }
 
         let updateFields = {};
 
-        // Verificar los campos a actualizar
-        if (proveedor) {
-            const proveedorExistente = await Provider.findById(proveedor);
-            if (!proveedorExistente) {
-                return res.status(404).json({ message: "Proveedor no encontrado" });
+        // Verify fields to update
+        if (provider) {
+            const existingProvider = await Provider.findById(provider);
+            if (!existingProvider) {
+                return res.status(404).json({ message: "Provider not found" });
             }
-            updateFields.proveedor = proveedor;
+            updateFields.provider = provider;
         }
 
-        if (fecha_compra !== undefined) updateFields.fecha_compra = fecha_compra;
-        
-        // Manejar cambio de estado y actualización de stock si es necesario
-        if (estado !== undefined) {
-            if (currentPurchase.estado !== estado) {
-                // Si cambia de activo a inactivo
-                if (currentPurchase.estado === "active" && estado === "inactive") {
-                    for (const item of currentPurchase.productos) {
-                        const product = await Product.findById(item.producto);
-                        if (product) {
-                            if (product.stock >= item.cantidad) {
-                                await product.decrementStock(item.cantidad);
-                            } else {
-                                return res.status(400).json({
-                                    message: "No se puede desactivar la compra porque el producto ya no tiene suficiente stock disponible",
-                                    product: product.name
-                                });
-                            }
-                        }
-                    }
-                } 
-                // Si cambia de inactivo a activo
-                else if (currentPurchase.estado === "inactive" && estado === "active") {
-                    for (const item of currentPurchase.productos) {
-                        const product = await Product.findById(item.producto);
-                        if (product) {
-                            await product.incrementStock(item.cantidad);
-                        }
-                    }
-                }
-            }
-            updateFields.estado = estado;
-        }
+        if (purchase_date !== undefined) updateFields.purchase_date = purchase_date;
         
         if (Object.keys(updateFields).length === 0) {
-            return res.status(400).json({ message: "No hay campos válidos para actualizar" });
+            return res.status(400).json({ message: "No valid fields to update" });
         }
 
-        // No permitimos actualizar los productos para evitar inconsistencias en el stock
+        // We don't allow updating products to avoid stock inconsistencies
         const updatedPurchase = await Purchase.findByIdAndUpdate(id, updateFields, {
             new: true,
             runValidators: true
         })
-            .populate("proveedor", "name")
-            .populate("productos.producto", "name price");
+            .populate("provider", "name")
+            .populate("products.product", "name price");
+
+        if (!updatedPurchase) {
+            return res.status(404).json({ message: "Purchase not found" });
+        }
 
         const formattedPurchase = updatedPurchase.toObject();
         
-        if (formattedPurchase.fecha_compra) {
-            formattedPurchase.fecha_compra = new Date(formattedPurchase.fecha_compra).toISOString().split('T')[0];
+        if (formattedPurchase.purchase_date) {
+            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
         }
 
-        res.status(200).json({ message: "Compra actualizada exitosamente", purchase: formattedPurchase });
+        res.status(200).json({ message: "Purchase updated successfully", purchase: formattedPurchase });
     } catch (error) {
-        console.error("Error al actualizar compra:", error);
+        console.error("Error updating purchase:", error);
         
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
-            return res.status(400).json({ message: "Error de validación", errors });
+            return res.status(400).json({ message: "Validation error", errors });
         }
         
-        res.status(500).json({ message: "Error del servidor", details: error.message });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// Actualizar estado de compra
+// Update purchase status
 export const updatePurchaseStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_purchases")) {
-            return res.status(403).json({ message: "Acceso no autorizado" });
+            return res.status(403).json({ message: "Unauthorized access" });
         }
 
         const { id } = req.params;
-        const { estado } = req.body;
+        const { status } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Formato de ID de compra inválido" });
+            return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        if (!estado || !["active", "inactive"].includes(estado)) {
-            return res.status(400).json({ message: "El estado debe ser 'active' o 'inactive'" });
+        if (!status || !["active", "inactive"].includes(status)) {
+            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
         }
 
-        // Obtener la compra actual para verificar su estado previo
+        // Get current purchase to check its previous state
         const currentPurchase = await Purchase.findById(id);
         
         if (!currentPurchase) {
-            return res.status(404).json({ message: "Compra no encontrada" });
+            return res.status(404).json({ message: "Purchase not found" });
         }
         
-        // Solo actualizar el stock si el estado está cambiando
-        if (currentPurchase.estado !== estado) {
-            // Si está pasando de active a inactive, decrementar el stock
-            if (currentPurchase.estado === "active" && estado === "inactive") {
-                for (const item of currentPurchase.productos) {
-                    const product = await Product.findById(item.producto);
+        // Only update stock if status is changing
+        if (currentPurchase.status !== status) {
+            // If changing from active to inactive, decrement stock
+            if (currentPurchase.status === "active" && status === "inactive") {
+                for (const item of currentPurchase.products) {
+                    const product = await Product.findById(item.product);
                     if (product) {
-                        if (product.stock >= item.cantidad) {
-                            await product.decrementStock(item.cantidad);
+                        if (product.stock >= item.quantity) {
+                            await product.decrementStock(item.quantity);
                         } else {
                             return res.status(400).json({
-                                message: "No se puede desactivar la compra porque el producto ya no tiene suficiente stock disponible",
+                                message: "Cannot deactivate purchase because the product no longer has sufficient stock available",
                                 product: product.name
                             });
                         }
                     }
                 }
             } 
-            // Si está pasando de inactive a active, incrementar el stock
-            else if (currentPurchase.estado === "inactive" && estado === "active") {
-                for (const item of currentPurchase.productos) {
-                    const product = await Product.findById(item.producto);
+            // If changing from inactive to active, increment stock
+            else if (currentPurchase.status === "inactive" && status === "active") {
+                for (const item of currentPurchase.products) {
+                    const product = await Product.findById(item.product);
                     if (product) {
-                        await product.incrementStock(item.cantidad);
+                        await product.incrementStock(item.quantity);
                     }
                 }
             }
         }
 
-        // Actualizar el estado de la compra
+        // Update purchase status
         const updatedPurchase = await Purchase.findByIdAndUpdate(
             id,
-            { estado },
+            { status },
             { new: true, runValidators: true }
         )
-            .populate("proveedor", "name")
-            .populate("productos.producto", "name price");
+            .populate("provider", "name")
+            .populate("products.product", "name price");
 
         const formattedPurchase = updatedPurchase.toObject();
         
-        if (formattedPurchase.fecha_compra) {
-            formattedPurchase.fecha_compra = new Date(formattedPurchase.fecha_compra).toISOString().split('T')[0];
+        if (formattedPurchase.purchase_date) {
+            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
         }
 
         res.status(200).json({ 
-            message: `Compra ${estado === 'active' ? 'activada' : 'desactivada'} exitosamente y stock actualizado`, 
+            message: `Purchase ${status === 'active' ? 'activated' : 'deactivated'} successfully and stock updated`, 
             purchase: formattedPurchase 
         });
     } catch (error) {
-        console.error("Error al actualizar estado de compra:", error);
-        res.status(500).json({ message: "Error del servidor", details: error.message });
+        console.error("Error updating purchase status:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// DELETE: Eliminar una compra por ID
+// DELETE: Remove a purchase by ID
 export const deletePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_purchases")) {
-            return res.status(403).json({ message: "Acceso no autorizado" });
+            return res.status(403).json({ message: "Unauthorized access" });
         }
 
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Formato de ID de compra inválido" });
+            return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Buscar la compra antes de eliminarla para actualizar el stock
+        // Find purchase before deleting to update stock
         const purchaseToDelete = await Purchase.findById(id);
         
         if (!purchaseToDelete) {
-            return res.status(404).json({ message: "Compra no encontrada" });
+            return res.status(404).json({ message: "Purchase not found" });
         }
         
-        // Revertir los incrementos de stock realizados en la compra
-        if (purchaseToDelete.estado === "active" && purchaseToDelete.productos && Array.isArray(purchaseToDelete.productos)) {
-            for (const item of purchaseToDelete.productos) {
-                const product = await Product.findById(item.producto);
+        // Revert stock increases made by the purchase
+        if (purchaseToDelete.status === "active" && purchaseToDelete.products && Array.isArray(purchaseToDelete.products)) {
+            for (const item of purchaseToDelete.products) {
+                const product = await Product.findById(item.product);
                 if (product) {
-                    // Verificar que haya suficiente stock para decrementar
-                    if (product.stock >= item.cantidad) {
-                        await product.decrementStock(item.cantidad);
+                    // Check if there's enough stock to decrement
+                    if (product.stock >= item.quantity) {
+                        await product.decrementStock(item.quantity);
                     } else {
                         return res.status(400).json({ 
-                            message: "No se puede eliminar la compra porque el producto ya no tiene suficiente stock disponible", 
+                            message: "Cannot delete purchase because the product no longer has sufficient stock available", 
                             product: product.name
                         });
                     }
@@ -428,63 +412,63 @@ export const deletePurchase = async (req, res) => {
             }
         }
 
-        // Eliminar la compra
+        // Delete the purchase
         await Purchase.findByIdAndDelete(id);
 
-        res.status(200).json({ message: "Compra eliminada exitosamente y stock actualizado" });
+        res.status(200).json({ message: "Purchase deleted successfully and stock updated" });
     } catch (error) {
-        console.error("Error al eliminar compra:", error);
-        res.status(500).json({ message: "Error del servidor", details: error.message });
+        console.error("Error deleting purchase:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// Exportar compras a PDF
+// Export purchases to PDF
 export const exportPurchaseToPdf = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_purchases")) {
-            return res.status(403).json({ message: "No tienes permiso para generar reportes" });
+            return res.status(403).json({ message: "You don't have permission to generate reports" });
         }
 
-        const { startDate, endDate, proveedorId, productoId, estado } = req.query;
+        const { startDate, endDate, providerId, productId, status } = req.query;
         
         if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
             return res.status(400).json({ 
-                message: "La fecha de inicio no puede ser posterior a la fecha de fin" 
+                message: "Start date cannot be later than end date" 
             });
         }
         
-        // Construir consulta
+        // Build query
         let query = {};
         
         if (startDate || endDate) {
-            query.fecha_compra = {};
-            if (startDate) query.fecha_compra.$gte = new Date(startDate);
-            if (endDate) query.fecha_compra.$lte = new Date(endDate);
+            query.purchase_date = {};
+            if (startDate) query.purchase_date.$gte = new Date(startDate);
+            if (endDate) query.purchase_date.$lte = new Date(endDate);
         }
         
-        if (proveedorId && mongoose.Types.ObjectId.isValid(proveedorId)) {
-            query.proveedor = proveedorId;
+        if (providerId && mongoose.Types.ObjectId.isValid(providerId)) {
+            query.provider = providerId;
         }
         
-        if (productoId && mongoose.Types.ObjectId.isValid(productoId)) {
-            query["productos.producto"] = productoId;
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            query["products.product"] = productId;
         }
         
-        // Filtro de estado
-        if (estado && ["active", "inactive"].includes(estado)) {
-            query.estado = estado;
+        // Status filter
+        if (status && ["active", "inactive"].includes(status)) {
+            query.status = status;
         }
 
-        // Obtener datos
+        // Get data
         const purchases = await Purchase.find(query)
-            .sort({ fecha_compra: -1 })
-            .populate("proveedor", "name")
-            .populate("productos.producto", "name price")
+            .sort({ purchase_date: -1 })
+            .populate("provider", "name")
+            .populate("products.product", "name price")
             .lean();
             
         if (purchases.length === 0) {
             return res.status(404).json({ 
-                message: "No se encontraron compras con los criterios especificados" 
+                message: "No purchases found with the specified criteria" 
             });
         }
 
@@ -492,60 +476,60 @@ export const exportPurchaseToPdf = async (req, res) => {
         let providerInfo = null;
         let productInfo = null;
         
-        if (proveedorId && mongoose.Types.ObjectId.isValid(proveedorId)) {
-            providerInfo = await Provider.findById(proveedorId).lean();
+        if (providerId && mongoose.Types.ObjectId.isValid(providerId)) {
+            providerInfo = await Provider.findById(providerId).lean();
         }
         
-        if (productoId && mongoose.Types.ObjectId.isValid(productoId)) {
-            productInfo = await Product.findById(productoId).lean();
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            productInfo = await Product.findById(productId).lean();
         }
 
-        // Configurar headers para descarga de PDF
+        // Configure headers for PDF download
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.pdf`);
 
-        // Preparar opciones para el reporte PDF
+        // Prepare options for the PDF report
         const reportOptions = {
             data: purchases,
-            title: "Reporte de Compras",
+            title: "Purchase Report",
             companyName: companyName,
             filters: {
                 startDate,
                 endDate,
-                proveedor: providerInfo ? providerInfo.name : "Todos",
-                producto: productInfo ? productInfo.name : "Todos",
-                estado: estado || "Todos"
+                provider: providerInfo ? providerInfo.name : "All",
+                product: productInfo ? productInfo.name : "All",
+                status: status || "All"
             },
             columns: [
                 { header: "ID", key: "id", width: 80 },
-                { header: "Fecha", key: "fecha_compra", width: 100, type: "date" },
-                { header: "Proveedor", key: "proveedorName", width: 150 },
-                { header: "Productos (Cantidad)", key: "productosDetalle", width: 200 },
+                { header: "Date", key: "purchase_date", width: 100, type: "date" },
+                { header: "Provider", key: "providerName", width: 150 },
+                { header: "Products (Quantity)", key: "productsDetail", width: 200 },
                 { header: "Total", key: "total", width: 120, align: "right", type: "currency" },
-                { header: "Estado", key: "estado", width: 80 }
+                { header: "Status", key: "status", width: 80 }
             ],
             formatData: (purchase) => {
-                // Formatear productos con cantidades
-                let productosDetalle = "Sin productos";
-                if (purchase.productos && purchase.productos.length > 0) {
-                    productosDetalle = purchase.productos.map(item => {
-                        const productName = item.producto?.name || "Producto desconocido";
-                        return `${productName} (${item.cantidad})`;
+                // Format products with quantities
+                let productsDetail = "No products";
+                if (purchase.products && purchase.products.length > 0) {
+                    productsDetail = purchase.products.map(item => {
+                        const productName = item.product?.name || "Unknown product";
+                        return `${productName} (${item.quantity})`;
                     }).join(", ");
                 }
                 
-                // Formatear datos de cada fila
+                // Format row data
                 return {
                     id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
-                    fecha_compra: purchase.fecha_compra ? new Date(purchase.fecha_compra) : null,
-                    proveedorName: purchase.proveedor?.name || "Desconocido",
-                    productosDetalle: productosDetalle,
+                    purchase_date: purchase.purchase_date ? new Date(purchase.purchase_date) : null,
+                    providerName: purchase.provider?.name || "Unknown",
+                    productsDetail: productsDetail,
                     total: purchase.total || 0,
-                    estado: purchase.estado || "N/A"
+                    status: purchase.status || "N/A"
                 };
             },
             calculateSummary: (data) => {
-                // Calcular información de resumen
+                // Calculate summary information
                 const totalAmount = data.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
                 return {
                     count: data.length,
@@ -558,75 +542,75 @@ export const exportPurchaseToPdf = async (req, res) => {
         try {
             await generatePdfReport(reportOptions, res);
         } catch (pdfError) {
-            console.error("Error al generar PDF:", pdfError);
+            console.error("Error generating PDF:", pdfError);
             
             if (!res.headersSent) {
                 return res.status(500).json({ 
-                    message: "Error al generar reporte PDF", 
+                    message: "Error generating PDF report", 
                     error: pdfError.message 
                 });
             }
         }
         
     } catch (error) {
-        console.error("Error al generar reporte PDF:", error);
+        console.error("Error generating PDF report:", error);
         
         if (!res.headersSent) {
             return res.status(500).json({ 
-                message: "Error al generar reporte PDF", 
+                message: "Error generating PDF report", 
                 error: error.message
             });
         }
     }
 };
 
-// Exportar compras a Excel
+// Export purchases to Excel
 export const exportPurchaseToExcel = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_purchases")) {
-            return res.status(403).json({ message: "No tienes permiso para generar reportes" });
+            return res.status(403).json({ message: "You don't have permission to generate reports" });
         }
 
-        const { startDate, endDate, proveedorId, productoId, estado } = req.query;
+        const { startDate, endDate, providerId, productId, status } = req.query;
         
         if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
             return res.status(400).json({ 
-                message: "La fecha de inicio no puede ser posterior a la fecha de fin" 
+                message: "Start date cannot be later than end date" 
             });
         }
         
-        // Construir consulta
+        // Build query
         let query = {};
         
         if (startDate || endDate) {
-            query.fecha_compra = {};
-            if (startDate) query.fecha_compra.$gte = new Date(startDate);
-            if (endDate) query.fecha_compra.$lte = new Date(endDate);
+            query.purchase_date = {};
+            if (startDate) query.purchase_date.$gte = new Date(startDate);
+            if (endDate) query.purchase_date.$lte = new Date(endDate);
         }
         
-        if (proveedorId && mongoose.Types.ObjectId.isValid(proveedorId)) {
-            query.proveedor = proveedorId;
+        if (providerId && mongoose.Types.ObjectId.isValid(providerId)) {
+            query.provider = providerId;
         }
         
-        if (productoId && mongoose.Types.ObjectId.isValid(productoId)) {
-            query["productos.producto"] = productoId;
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            query["products.product"] = productId;
         }
         
-        // Filtro de estado
-        if (estado && ["active", "inactive"].includes(estado)) {
-            query.estado = estado;
+        // Status filter
+        if (status && ["active", "inactive"].includes(status)) {
+            query.status = status;
         }
 
-        // Obtener datos
+        // Get data
         const purchases = await Purchase.find(query)
-            .sort({ fecha_compra: -1 })
-            .populate("proveedor", "name")
-            .populate("productos.producto", "name price")
+            .sort({ purchase_date: -1 })
+            .populate("provider", "name")
+            .populate("products.product", "name price")
             .lean();
             
         if (purchases.length === 0) {
             return res.status(404).json({ 
-                message: "No se encontraron compras con los criterios especificados" 
+                message: "No purchases found with the specified criteria" 
             });
         }
 
@@ -634,60 +618,60 @@ export const exportPurchaseToExcel = async (req, res) => {
         let providerInfo = null;
         let productInfo = null;
         
-        if (proveedorId && mongoose.Types.ObjectId.isValid(proveedorId)) {
-            providerInfo = await Provider.findById(proveedorId).lean();
+        if (providerId && mongoose.Types.ObjectId.isValid(providerId)) {
+            providerInfo = await Provider.findById(providerId).lean();
         }
         
-        if (productoId && mongoose.Types.ObjectId.isValid(productoId)) {
-            productInfo = await Product.findById(productoId).lean();
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            productInfo = await Product.findById(productId).lean();
         }
 
-        // Configurar headers para descarga de Excel
+        // Configure headers for Excel download
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.xlsx`);
 
-        // Preparar opciones para el reporte Excel
+        // Prepare options for the Excel report
         const reportOptions = {
             data: purchases,
-            title: "Reporte de Compras",
+            title: "Purchase Report",
             companyName: companyName,
             filters: {
                 startDate,
                 endDate,
-                proveedor: providerInfo ? providerInfo.name : "Todos",
-                producto: productInfo ? productInfo.name : "Todos",
-                estado: estado || "Todos"
+                provider: providerInfo ? providerInfo.name : "All",
+                product: productInfo ? productInfo.name : "All",
+                status: status || "All"
             },
             columns: [
                 { header: "ID", key: "id", width: 15 },
-                { header: "Fecha", key: "fecha_compra", width: 15, type: "date" },
-                { header: "Proveedor", key: "proveedorName", width: 30 },
-                { header: "Productos (Cantidad)", key: "productosDetalle", width: 50 },
+                { header: "Date", key: "purchase_date", width: 15, type: "date" },
+                { header: "Provider", key: "providerName", width: 30 },
+                { header: "Products (Quantity)", key: "productsDetail", width: 50 },
                 { header: "Total", key: "total", width: 20, align: "right", type: "currency" },
-                { header: "Estado", key: "estado", width: 15 }
+                { header: "Status", key: "status", width: 15 }
             ],
             formatData: (purchase) => {
-                // Formatear productos con cantidades
-                let productosDetalle = "Sin productos";
-                if (purchase.productos && purchase.productos.length > 0) {
-                    productosDetalle = purchase.productos.map(item => {
-                        const productName = item.producto?.name || "Producto desconocido";
-                        return `${productName} (${item.cantidad})`;
+                // Format products with quantities
+                let productsDetail = "No products";
+                if (purchase.products && purchase.products.length > 0) {
+                    productsDetail = purchase.products.map(item => {
+                        const productName = item.product?.name || "Unknown product";
+                        return `${productName} (${item.quantity})`;
                     }).join(", ");
                 }
                 
-                // Formatear datos de cada fila
+                // Format row data
                 return {
                     id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
-                    fecha_compra: purchase.fecha_compra ? new Date(purchase.fecha_compra) : null,
-                    proveedorName: purchase.proveedor?.name || "Desconocido",
-                    productosDetalle: productosDetalle,
+                    purchase_date: purchase.purchase_date ? new Date(purchase.purchase_date) : null,
+                    providerName: purchase.provider?.name || "Unknown",
+                    productsDetail: productsDetail,
                     total: purchase.total || 0,
-                    estado: purchase.estado || "N/A"
+                    status: purchase.status || "N/A"
                 };
             },
             calculateSummary: (data) => {
-                // Calcular información de resumen
+                // Calculate summary information
                 const totalAmount = data.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
                 return {
                     count: data.length,
@@ -699,24 +683,24 @@ export const exportPurchaseToExcel = async (req, res) => {
         
         try {
             await generateExcelReport(reportOptions, res);
-            console.log("Archivo Excel generado y enviado exitosamente");
+            console.log("Excel file generated and sent successfully");
         } catch (excelError) {
-            console.error("Error al generar archivo Excel:", excelError);
+            console.error("Error generating Excel file:", excelError);
             
             if (!res.headersSent) {
                 return res.status(500).json({ 
-                    message: "Error al generar reporte Excel", 
+                    message: "Error generating Excel report", 
                     error: excelError.message 
                 });
             }
         }
         
     } catch (error) {
-        console.error("Error al generar reporte Excel:", error);
+        console.error("Error generating Excel report:", error);
         
         if (!res.headersSent) {
             return res.status(500).json({ 
-                message: "Error al generar reporte Excel", 
+                message: "Error generating Excel report", 
                 error: error.message
             });
         }
