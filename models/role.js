@@ -1,31 +1,29 @@
 import mongoose from "mongoose";
 
-const permissionSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true
-  }
+const RoleSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  name: { type: String, required: true, unique: true, trim: true, lowercase: true },
+  status: { type: String, enum: ["active", "inactive"], default: "active" },
+  permissions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Permission'}],
+  isDefault: { type: Boolean, default: false } // Añadido porque se usa en los controladores
+}, {
+  // Estas son opciones del esquema, deben ir en el segundo argumento
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-const RoleSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    lowercase: true
-  },
-  status: {
-    type: Boolean,
-    default: false
-  },
-  permissions: [permissionSchema]
-}, { timestamps: true });
-
-// Método estático para obtener roles predeterminados
 RoleSchema.statics.getDefaultRoles = function() {
   return ["admin", "assistant", "employee"];
 };
 
-const Role = mongoose.model("Role", RoleSchema);
-export default Role;
+RoleSchema.virtual('displayName').get(function() {
+  const translations = {
+    'admin': 'Administrador',
+    'assistant': 'Asistente',
+    'employee': 'Empleado'
+  };
+  return translations[this.name] || this.name;
+});
+
+export default mongoose.model("Role", RoleSchema);

@@ -1,122 +1,149 @@
-// utils/permissions.js
 import Role from "../models/role.js";
+import Permission from "../models/permission.js";
 
-// Lista completa de todos los permisos disponibles en el sistema
+// Lista completa de todos los permisos disponibles en el sistema (código en inglés)
 export const ALL_PERMISSIONS = [
-  "view_roles", "view_roles_id", "create_roles", "update_roles", "delete_roles",
-  "create_users", "view_users", "view_users_id", "update_users", "delete_users",
+  // Roles
+  "view_roles", "view_roles_id", "create_roles", "update_roles", "delete_roles", "update_role_status",
+
+  // Users
+  "create_users", "view_users", "view_users_id", "update_users", "delete_users", "update_user_status",
+
+  // Categories
   "view_categories", "view_categories_id", "create_categories", "update_categories", "delete_categories", "update_status_categories",
+
+  // Providers
   "view_providers", "view_providers_id", "create_providers", "update_providers", "delete_providers", "update_status_providers",
+
+  // Products
   "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
+
+  // Purchases
   "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "delete_purchases", "update_status_purchases",
+
+  // Branches
   "view_branches", "create_branches", "update_branches", "delete_branches",
+
+  // Customers
   "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers", "update_customers_status",
-  "view_sales", "view_sales_id", "create_sales", "update_sales", "delete_sales"
+
+  // Sales
+  "view_sales", "view_sales_id", "create_sales", "update_sales", "delete_sales",
+
+  // Permissions
+  "view_permissions", "view_permissions_id", "create_permissions", "update_permissions", "delete_permissions", "update_permission_status"
 ];
 
-// Permisos por defecto para los roles predefinidos
+// Permisos por defecto para los roles predefinidos (usando códigos en inglés)
 const DEFAULT_PERMISSIONS = {
-  admin: [
-    "view_roles", "view_roles_id", "create_roles", "update_roles", "delete_roles", 
-    "create_users", "view_users", "view_users_id", "update_users", "delete_users", "update_user_status",
-    "view_categories", "view_categories_id", "create_categories", "update_categories", "delete_categories", "update_status_categories",
-    "view_providers", "view_providers_id", "create_providers", "update_providers", "delete_providers", "update_status_providers",
-    "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
-    "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "delete_purchases", "update_status_purchases",
-    "view_branches", "create_branches", "update_branches", "delete_branches", 
-    "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers", "update_customers_status",
-    "view_sales", "view_sales_id", "create_sales", "update_sales", "delete_sales"
-  ],
+  admin: [...ALL_PERMISSIONS], // El administrador tiene todos los permisos
+
   assistant: [
     "view_roles", "view_users", "view_users_id",
-    "view_categories", "view_categories_id","create_categories", "view_customers", "update_status_categories",
+    "view_categories", "view_categories_id", "create_categories", "update_status_categories",
     "view_providers", "view_providers_id", "create_providers", "update_providers", "update_status_providers",
     "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
     "view_purchases", "view_purchases_id", "create_purchases", "update_purchases", "update_status_purchases",
     "view_customers", "view_customers_id", "create_customers", "update_customers",
-    "view_sales", "view_sales_id", "view_sales", "view_sales_id", "create_sales", "update_sales"
+    "view_sales", "view_sales_id", "create_sales", "update_sales"
   ],
+
   employee: [
-    "view_categories", "view_products", "view_products_id","create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
-     "view_customers", "view_sales", "view_customers_id", "create_sales", "update_sales"
+    "view_categories",
+    "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
+    "view_customers", "view_customers_id",
+    "view_sales", "view_sales_id", "create_sales", "update_sales"
   ]
 };
 
-// Función para obtener permisos predeterminados por nombre de rol
+// Función para crear los permisos iniciales en la base de datos
+export const createInitialPermissions = async () => {
+  try {
+    // Obtener la traducción de los permisos
+    const codeToName = Permission.getCodeToNameTranslation();
+    
+    // Verificar si ya hay permisos en la base de datos
+    const count = await Permission.countDocuments();
+    if (count > 0) {
+      console.log("Ya existen permisos en la base de datos, no se crearán más.");
+      return;
+    }
+    
+    // Crear batch de permisos iniciales
+    const initialPermissions = ALL_PERMISSIONS.map(code => ({
+      code: code,
+      name: codeToName[code] || code, // Usar la traducción en español, o el código si no hay traducción
+      description: `Permiso para ${codeToName[code] || code}`,
+      status: 'active'
+    }));
+    
+    // Guardar todos los permisos en la base de datos
+    await Permission.insertMany(initialPermissions);
+    console.log(`Se han creado ${initialPermissions.length} permisos iniciales.`);
+  } catch (error) {
+    console.error("Error al crear permisos iniciales:", error);
+  }
+};
+
+// Obtener permisos por defecto según el nombre del rol (devuelve códigos en inglés)
 export const getDefaultPermissions = (roleName) => {
   return DEFAULT_PERMISSIONS[roleName] || [];
 };
 
-// Función actualizada para verificar permisos (versión asíncrona)
-export const checkPermission = async (roleId, action) => {
+// Verifica si un rol tiene cierto permiso (versión asíncrona con consulta a DB)
+export const checkPermission = async (roleId, permissionCode) => {
   try {
-    // Buscar el rol en la base de datos
-    const role = await Role.findById(roleId);
-    
-    if (!role) {
-      return false;
-    }
-    
-    // Verificar en permisos predefinidos primero
+    const role = await Role.findById(roleId).populate('permissions');
+    if (!role) return false;
+
+    // Si es un rol predeterminado, verificar en la configuración estática
     if (role.isDefault && DEFAULT_PERMISSIONS[role.name]) {
-      const hasPermission = DEFAULT_PERMISSIONS[role.name].includes(action);
-      return hasPermission;
+      return DEFAULT_PERMISSIONS[role.name].includes(permissionCode);
     }
-    
-    // Verificar en permisos almacenados
-    const hasPermission = role.permissions.some(permission => 
-      typeof permission === 'string' ? permission === action : permission.name === action
-    );
-    return hasPermission;
+
+    // Verificar si el rol tiene el permiso en su array de permisos
+    if (role.permissions && role.permissions.length > 0) {
+      return role.permissions.some(permission => 
+        permission.code === permissionCode
+      );
+    }
+
+    return false;
   } catch (error) {
+    console.error("Error checking permission:", error);
     return false;
   }
 };
 
-// Versión sincrónica para usar cuando ya tenemos el objeto de rol
-export const checkPermissionSync = (role, action) => {
-  
-  // Si recibimos un objeto de rol completo
-  if (typeof role === 'object' && role !== null) {
-    // Verificar en permisos predefinidos primero si es un rol predeterminado
+// Verifica permiso sincrónicamente si ya tienes el objeto de rol completo
+export const checkPermissionSync = (role, permissionCode) => {
+  // Si role es un objeto (documento de mongoose)
+  if (role && typeof role === 'object') {
+    // Si es un rol predefinido, verificar en configuración estática
     if (role.isDefault && role.name && DEFAULT_PERMISSIONS[role.name]) {
-      const hasDefaultPermission = DEFAULT_PERMISSIONS[role.name].includes(action);
-      console.log("Verificando permisos predefinidos:", { 
-        role: role.name, 
-        action, 
-        hasPermission: hasDefaultPermission 
-      });
-      return hasDefaultPermission;
+      return DEFAULT_PERMISSIONS[role.name].includes(permissionCode);
     }
-    
-    // Verificar en permisos almacenados
+
+    // Verificar en el array de permisos del rol
     if (role.permissions && Array.isArray(role.permissions)) {
-      const hasPermission = role.permissions.some(permission => 
-        typeof permission === 'string' ? permission === action : permission.name === action
-      );
-      console.log("Verificando permisos del objeto:", { 
-        role: role.name, 
-        action, 
-        hasPermission 
+      return role.permissions.some(permission => {
+        // Si es un ObjectId o string
+        if (typeof permission === 'string') {
+          return permission === permissionCode;
+        }
+        // Si es un documento Permission de Mongoose
+        if (permission && typeof permission === 'object') {
+          return permission.code === permissionCode;
+        }
+        return false;
       });
-      return hasPermission;
     }
-    
-    // Si llegamos aquí y no encontramos permisos, usar el nombre
-    role = role.name;
   }
-  
-  // Si es un nombre de rol (string)
+
+  // Si role es un string (nombre del rol)
   if (typeof role === 'string' && DEFAULT_PERMISSIONS[role]) {
-    const hasStringPermission = DEFAULT_PERMISSIONS[role].includes(action);
-    console.log("Verificando permisos por nombre:", { 
-      role, 
-      action, 
-      hasPermission: hasStringPermission 
-    });
-    return hasStringPermission;
+    return DEFAULT_PERMISSIONS[role].includes(permissionCode);
   }
-  
-  console.log("No se encontró permiso para:", { role, action });
+
   return false;
 };
