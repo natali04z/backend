@@ -95,7 +95,7 @@ export const getBranchesById = async (req, res) => {
 // Create a new branch
 export const postBranches = async (req, res) => {
     try {
-        const { name, location, status, phone, address } = req.body;
+        const { name, location, phone, address } = req.body;
         
         // Validate data
         const validation = validateBranchData(req.body);
@@ -119,7 +119,6 @@ export const postBranches = async (req, res) => {
             id, 
             name, 
             location, 
-            status, 
             phone, 
             address 
         });
@@ -200,10 +199,77 @@ export const deleteBranches = async (req, res) => {
     }
 };
 
+// Update branch status
+export const updateBranchStatus = async (req, res) => {
+    try {
+        // Uncomment this if you have role-based authorization
+        // if (!checkPermission(req.user.role, "update_status_branches")) {
+        //     return res.status(403).json({ message: "Unauthorized access" });
+        // }
+
+        const { id } = req.params;
+        const { status } = req.body;
+
+        // Validate status
+        if (!status || !["active", "inactive", "pending"].includes(status)) {
+            return res.status(400).json({ 
+                message: "Status must be 'active', 'inactive' or 'pending'" 
+            });
+        }
+
+        // Check if branch exists
+        const existingBranch = await Branch.findOne({ id });
+        if (!existingBranch) {
+            return res.status(404).json({ message: "Branch not found" });
+        }
+
+        // Additional validation before setting inactive status
+        // Uncomment and adapt if needed
+        /*
+        if (status === 'inactive') {
+            // Check if this branch has active employees or services
+            // Example:
+            // const Employee = mongoose.model('Employee');
+            // const activeEmployeesCount = await Employee.countDocuments({ 
+            //     branch: id, 
+            //     status: 'active' 
+            // });
+            
+            // if (activeEmployeesCount > 0) {
+            //     return res.status(400).json({ 
+            //         message: `Cannot deactivate this branch. It has ${activeEmployeesCount} active employees. Please reassign or deactivate these employees first.`
+            //     });
+            // }
+        }
+        */
+
+        // Update branch status
+        const updatedBranch = await Branch.findOneAndUpdate(
+            { id },
+            { status },
+            { new: true, runValidators: true }
+        ).select("id name status");
+
+        if (!updatedBranch) {
+            return res.status(404).json({ message: "Branch not found" });
+        }
+
+        // Return success response
+        res.status(200).json({ 
+            message: `Branch ${status === 'active' ? 'activated' : (status === 'inactive' ? 'deactivated' : 'set to pending')} successfully`, 
+            branch: updatedBranch 
+        });
+    } catch (error) {
+        console.error("Error updating branch status:", error);
+        res.status(500).json({ message: "Error updating branch status", error: error.message });
+    }
+};
+
 export default {
     getBranches,
     getBranchesById,
     postBranches,
     updateBranches,
-    deleteBranches
+    deleteBranches,
+    updateBranchStatus
 };
