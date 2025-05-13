@@ -104,6 +104,13 @@ export const authenticateUser = async (req, res, next) => {
         }
       }
       
+      // NUEVO: Verificar el estado del rol
+      if (role && role.status === 'inactive') {
+        return res.status(403).json({ 
+          message: "Access denied. Your role is currently inactive. Please contact an administrator." 
+        });
+      }
+      
       // Configurar req.user con valores seguros
       req.user = {
         id: user._id,
@@ -147,6 +154,13 @@ export const authorizePermission = (permissionCode) => {
       }
 
       const role = req.user.role;
+      
+      // NUEVO: Verificar el estado del rol (verificación adicional)
+      if (role.status === 'inactive') {
+        return res.status(403).json({ 
+          message: "Access denied. Your role is currently inactive. Please contact an administrator." 
+        });
+      }
 
       // Caso especial: Si es admin, permitir todo
       if (role.name === 'admin') {

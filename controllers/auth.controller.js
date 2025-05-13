@@ -85,34 +85,48 @@ export const registerUser = async (req, res) => {
 export const loginUser = async (req, res) => {
     try {
         const { email, password } = req.body;
-
+        
         if (!email || !password) {
             return res.status(400).json({ message: "Email and password are required" });
         }
-
+        
         const user = await User.findOne({ email }).populate("role");
         if (!user) {
             return res.status(401).json({ message: "Invalid credentials" });
         }
-
+        
         if (user.status === 'inactive') {
             return res.status(403).json({ 
                 message: "Your account is inactive. Please contact an administrator." 
             });
         }
-
+        
+        // NUEVO: Verificar si el rol existe y está activo
+        if (!user.role) {
+            return res.status(403).json({ 
+                message: "Your account has no role assigned. Please contact an administrator." 
+            });
+        }
+        
+        // NUEVO: Verificar el estado del rol
+        if (user.role.status === 'inactive') {
+            return res.status(403).json({ 
+                message: "Access denied. Your role is currently inactive. Please contact an administrator." 
+            });
+        }
+        
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(401).json({ message: "Invalid credentials" });
         }
-
+        
         const token = jwt.sign(
             {id: user._id, role: user.role._id},
             process.env.JWT_SECRET,
             { expiresIn: "30m" }
         );
-
-        res.json({ 
+        
+        res.json({
             token,
             user: {
                 id: user._id,
@@ -123,7 +137,6 @@ export const loginUser = async (req, res) => {
                 status: user.status
             }
         });
-
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });
     }
