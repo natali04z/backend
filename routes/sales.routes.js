@@ -4,9 +4,10 @@ import {
     getSaleById,
     postSale,
     updateSale,
+    updateSaleStatus,
     deleteSale,
-    exportSalesPDF,
-    exportSalesExcel
+    exportSaleToPdf,
+    exportSaleToExcel
 } from "../controllers/sales.controller.js";
 
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
@@ -19,7 +20,8 @@ router.get("/:id", authenticateUser, authorizePermission("view_sales_id"), getSa
 router.post("/", authenticateUser, authorizePermission("create_sales"), postSale);
 router.put("/:id", authenticateUser, authorizePermission("update_sales"), updateSale);
 router.delete("/:id", authenticateUser, authorizePermission("delete_sales"), deleteSale);
-router.get("/export/pdf", authenticateUser, authorizePermission("view_sales"), exportSalesPDF);
-router.get("/export/excel", authenticateUser, authorizePermission("view_sales"), exportSalesExcel);
+router.patch("/:id/status", authenticateUser, authorizePermission("update_status_sales"), updateSaleStatus);
+router.get("/export/pdf", authenticateUser, authorizePermission("view_sales"), exportSaleToPdf);
+router.get("/export/excel", authenticateUser, authorizePermission("view_sales"), exportSaleToExcel);
 
 export default router;

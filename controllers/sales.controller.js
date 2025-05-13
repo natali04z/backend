@@ -3,55 +3,44 @@ import Sale from "../models/sales.js";
 import Product from "../models/product.js";
 import Customer from "../models/customer.js";
 import { checkPermission } from "../utils/permissions.js";
-import PDFDocument from "pdfkit";
-import ExcelJS from "exceljs";
+import { generatePdfReport, generateExcelReport } from "../utils/report-exporters.js";
 
-// Function to generate sale ID
 async function generateSaleId() {
     const lastSale = await Sale.findOne().sort({ createdAt: -1 });
-    if (!lastSale || !/^Sa\d{2}$/.test(lastSale.id)) return "Sa01";
+    if (!lastSale || !/^Sa\d{2}$/.test(lastSale.id)) {
+        return "Sa01";
+    }
+
     const lastNumber = parseInt(lastSale.id.substring(2), 10);
     const nextNumber = (lastNumber + 1).toString().padStart(2, "0");
     return `Sa${nextNumber}`;
 }
 
-// Validate sale data
 function validateSaleData(data, isUpdate = false) {
     const errors = [];
     
-    // Only validate required fields if it's not an update
     if (!isUpdate) {
-        if (!data.customer) errors.push("Customer is required");
-        if (!Array.isArray(data.products) || data.products.length === 0) {
+        if (!data.products || !Array.isArray(data.products) || data.products.length === 0) {
             errors.push("At least one product is required");
         }
+        if (!data.customer) errors.push("Customer is required");
     }
     
-    // Validate customer ID if provided
     if (data.customer && !mongoose.Types.ObjectId.isValid(data.customer)) {
         errors.push("Invalid customer ID format");
     }
     
-    // Validate products array if provided
-    if (data.products) {
-        if (!Array.isArray(data.products)) {
-            errors.push("Products must be an array");
-        } else {
-            data.products.forEach((item, index) => {
-                if (!item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
-                    errors.push(`Invalid product ID at index ${index}`);
-                }
-                if (!item.quantity || typeof item.quantity !== 'number' || item.quantity <= 0) {
-                    errors.push(`Invalid quantity at index ${index}`);
-                }
-                if (!item.price || typeof item.price !== 'number' || item.price <= 0) {
-                    errors.push(`Invalid price at index ${index}`);
-                }
-            });
-        }
+    if (data.products && Array.isArray(data.products)) {
+        data.products.forEach((item, index) => {
+            if (!item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
+                errors.push(`Invalid product at index ${index}`);
+            }
+            if (typeof item.quantity !== 'number' || !Number.isInteger(item.quantity) || item.quantity <= 0) {
+                errors.push(`Invalid quantity at index ${index}. Must be a positive integer`);
+            }
+        });
     }
     
-    // Validate date if provided
     if (data.salesDate !== undefined) {
         const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z)?$/;
         if (!dateRegex.test(data.salesDate) && !(data.salesDate instanceof Date)) {
@@ -64,46 +53,22 @@ function validateSaleData(data, isUpdate = false) {
 
 // GET: Retrieve all sales
 export const getSales = async (req, res) => {
-    try {
-        // Check if req.user exists before accessing its role property
+    try {        
         if (!req.user || !checkPermission(req.user.role, "view_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        // Query all sales
         console.log("Executing sales query");
         const sales = await Sale.find()
-            .populate("customer", "name")
-            .populate("products.product", "name price"); // Also populate price
+            .populate("customer", "name email phone")
+            .populate("products.product", "name price");
         console.log(`Found ${sales.length} sales`);
 
-        // Format response
         const formattedSales = sales.map(sale => {
             const saleObj = sale.toObject();
             
-            // Format sale date
             if (saleObj.salesDate) {
                 saleObj.salesDate = new Date(saleObj.salesDate).toISOString().split('T')[0];
-            }
-            
-            // Ensure product information is consistent
-            if (saleObj.products && Array.isArray(saleObj.products)) {
-                saleObj.products = saleObj.products.map(product => {
-                    // Calculate or verify product total
-                    if (!product.total || product.total !== product.price * product.quantity) {
-                        product.total = product.price * product.quantity;
-                    }
-                    return product;
-                });
-            } else {
-                // Handle case where products might be missing
-                saleObj.products = [];
-            }
-            
-            // Verify or recalculate sale total
-            const calculatedTotal = saleObj.products.reduce((sum, item) => sum + item.total, 0);
-            if (!saleObj.total || Math.abs(saleObj.total - calculatedTotal) > 0.01) {
-                saleObj.total = calculatedTotal;
             }
             
             return saleObj;
@@ -119,7 +84,6 @@ export const getSales = async (req, res) => {
 // GET: Retrieve a single sale by ID
 export const getSaleById = async (req, res) => {
     try {
-        // Check if req.user exists before accessing its role property
         if (!req.user || !checkPermission(req.user.role, "view_sales_id")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
@@ -131,44 +95,17 @@ export const getSaleById = async (req, res) => {
         }
 
         const sale = await Sale.findById(id)
-            .populate("customer", "name")
+            .populate("customer", "name email phone")
             .populate("products.product", "name price");
 
         if (!sale) {
             return res.status(404).json({ message: "Sale not found" });
         }
 
-        // Format the response
         const formattedSale = sale.toObject();
         
-        // Format the sale date
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
-        }
-        
-        // Ensure product information is consistent
-        if (formattedSale.products && Array.isArray(formattedSale.products)) {
-            formattedSale.products = formattedSale.products.map(product => {
-                // Make sure product object has all required properties
-                if (!product.product) {
-                    product.product = { name: "Unknown Product" };
-                }
-                
-                // Calculate or verify product total
-                if (!product.total || product.total !== product.price * product.quantity) {
-                    product.total = product.price * product.quantity;
-                }
-                return product;
-            });
-        } else {
-            // Handle case where products might be missing
-            formattedSale.products = [];
-        }
-        
-        // Verify or recalculate sale total
-        const calculatedTotal = formattedSale.products.reduce((sum, item) => sum + item.total, 0);
-        if (!formattedSale.total || Math.abs(formattedSale.total - calculatedTotal) > 0.01) {
-            formattedSale.total = calculatedTotal;
         }
 
         res.status(200).json(formattedSale);
@@ -178,82 +115,75 @@ export const getSaleById = async (req, res) => {
     }
 };
 
-// POST: Create new sale
+// POST: Create new sale (solo registra la venta, no maneja estado)
 export const postSale = async (req, res) => {
     try {
-        // Check if req.user exists before accessing its role property
-        if (!req.user || !checkPermission(req.user.role, "create_sales")) {
+        if (!checkPermission(req.user.role, "create_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { customer, products } = req.body;
+        const { products, customer, salesDate } = req.body;
 
-        // Validate sale data
         const validationErrors = validateSaleData(req.body);
         if (validationErrors.length > 0) {
-            return res.status(400).json({ message: "Validation failed", errors: validationErrors });
+            return res.status(400).json({ message: "Validation error", errors: validationErrors });
         }
 
-        // Verify customer exists
-        if (!mongoose.Types.ObjectId.isValid(customer)) {
-            return res.status(400).json({ message: "Invalid customer ID" });
-        }
-
-        const customerExists = await Customer.findById(customer);
-        if (!customerExists) {
+        const existingCustomer = await Customer.findById(customer);
+        if (!existingCustomer) {
             return res.status(404).json({ message: "Customer not found" });
         }
 
         let total = 0;
-        const validatedProducts = [];
+        let validatedProducts = [];
 
-        // Process and validate each product
         for (let i = 0; i < products.length; i++) {
             const item = products[i];
             
-            // Verify product exists
-            const product = await Product.findById(item.product);
-            if (!product) {
+            const foundProduct = await Product.findById(item.product);
+            if (!foundProduct) {
                 return res.status(404).json({ message: `Product not found at index ${i}` });
             }
+
+            if (foundProduct.status !== "active") {
+                return res.status(400).json({ message: `Cannot sell inactive product at index ${i}` });
+            }
+
+            // Usar el precio del producto automáticamente
+            const sale_price = foundProduct.price;
+            const itemTotal = sale_price * item.quantity;
             
-            // Use product's price from database if not provided
-            const price = item.price || product.price;
-            
-            // Calculate totals
-            const quantity = item.quantity || 1;
-            const itemTotal = price * quantity;
-            
-            validatedProducts.push({ 
+            validatedProducts.push({
                 product: item.product,
-                quantity: quantity,
-                price: price,
-                total: itemTotal 
+                quantity: item.quantity,
+                sale_price: sale_price,
+                total: itemTotal
             });
+            
             total += itemTotal;
         }
 
-        // Generate sale ID
         const id = await generateSaleId();
 
         const newSale = new Sale({
             id,
             customer,
             products: validatedProducts,
-            total,
-            salesDate: req.body.salesDate || new Date()
+            salesDate: salesDate || new Date(),
+            total
+            // El estado se define en el modelo con default
         });
 
         await newSale.save();
 
-        // Format the response
         const formattedSale = newSale.toObject();
+        
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
         }
 
         res.status(201).json({ 
-            message: "Sale created successfully", 
+            message: "Sale registered successfully", 
             sale: formattedSale 
         });
     } catch (error) {
@@ -262,42 +192,41 @@ export const postSale = async (req, res) => {
     }
 };
 
-// PUT: Update an existing sale
+// PUT: Update an existing sale (solo datos generales, no estado)
 export const updateSale = async (req, res) => {
     try {
-        // Check if req.user exists before accessing its role property
-        if (!req.user || !checkPermission(req.user.role, "update_sales")) {
+        if (!checkPermission(req.user.role, "update_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
         const { id } = req.params;
-        const { customer, products, salesDate } = req.body;
+        const { customer, salesDate } = req.body;
+        
+        // Prohibir modificación de productos y status en UPDATE básico
+        if (req.body.products) {
+            return res.status(400).json({ 
+                message: "Cannot modify products through this endpoint. Use product management endpoint instead." 
+            });
+        }
+        
+        if (req.body.status) {
+            return res.status(400).json({ 
+                message: "Cannot modify status through this endpoint. Use status update endpoint instead." 
+            });
+        }
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid sale ID format" });
         }
 
-        // Validate input data (with isUpdate flag)
         const validationErrors = validateSaleData(req.body, true);
         if (validationErrors.length > 0) {
-            return res.status(400).json({ message: "Validation failed", errors: validationErrors });
-        }
-
-        // Find the sale
-        const sale = await Sale.findById(id);
-        if (!sale) {
-            return res.status(404).json({ message: "Sale not found" });
+            return res.status(400).json({ message: "Validation error", errors: validationErrors });
         }
 
         let updateFields = {};
-        let total = 0;
 
-        // Check and update customer if provided
         if (customer) {
-            if (!mongoose.Types.ObjectId.isValid(customer)) {
-                return res.status(400).json({ message: "Invalid customer ID format" });
-            }
-            
             const existingCustomer = await Customer.findById(customer);
             if (!existingCustomer) {
                 return res.status(404).json({ message: "Customer not found" });
@@ -305,62 +234,25 @@ export const updateSale = async (req, res) => {
             updateFields.customer = customer;
         }
 
-        // Process products if provided
-        if (products && Array.isArray(products)) {
-            const updatedProducts = [];
-            
-            for (let i = 0; i < products.length; i++) {
-                const item = products[i];
-                
-                if (!mongoose.Types.ObjectId.isValid(item.product)) {
-                    return res.status(400).json({ message: `Invalid product ID at index ${i}` });
-                }
-                
-                const product = await Product.findById(item.product);
-                if (!product) {
-                    return res.status(404).json({ message: `Product not found at index ${i}` });
-                }
-                
-                // Use product's price from database if not provided
-                const price = item.price || product.price;
-                
-                // Ensure quantity is valid
-                const quantity = item.quantity || 1;
-                
-                // Calculate item total
-                const itemTotal = price * quantity;
-                
-                updatedProducts.push({
-                    product: item.product, 
-                    quantity: quantity,
-                    price: price,
-                    total: itemTotal
-                });
-                total += itemTotal;
-            }
-            
-            updateFields.products = updatedProducts;
-            updateFields.total = total;
-        }
-
-        // Update date if provided
-        if (salesDate) {
-            updateFields.salesDate = salesDate;
-        }
-
-        // Check if there are fields to update
+        if (salesDate !== undefined) updateFields.salesDate = salesDate;
+        
         if (Object.keys(updateFields).length === 0) {
             return res.status(400).json({ message: "No valid fields to update" });
         }
 
-        // Update the sale
         const updatedSale = await Sale.findByIdAndUpdate(id, updateFields, {
             new: true,
             runValidators: true
-        }).populate("customer", "name").populate("products.product", "name");
+        })
+            .populate("customer", "name email phone")
+            .populate("products.product", "name price");
 
-        // Format the date in the response
+        if (!updatedSale) {
+            return res.status(404).json({ message: "Sale not found" });
+        }
+
         const formattedSale = updatedSale.toObject();
+        
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
         }
@@ -369,12 +261,118 @@ export const updateSale = async (req, res) => {
     } catch (error) {
         console.error("Error updating sale:", error);
         
-        // Handle Mongoose validation errors
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
-            return res.status(400).json({ message: "Validation failed", errors });
+            return res.status(400).json({ message: "Validation error", errors });
         }
         
+        res.status(500).json({ message: "Server error", details: error.message });
+    }
+};
+
+// PATCH: Update sale status (maneja estado y stock)
+export const updateSaleStatus = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "update_status_sales")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid sale ID format" });
+        }
+
+        const validStatuses = ["pending", "processing", "completed", "cancelled"];
+        if (!status || !validStatuses.includes(status)) {
+            return res.status(400).json({ 
+                message: "Status must be one of: pending, processing, completed, or cancelled" 
+            });
+        }
+
+        const currentSale = await Sale.findById(id);
+        
+        if (!currentSale) {
+            return res.status(404).json({ message: "Sale not found" });
+        }
+        
+        // Validar transiciones de estado
+        const allowedTransitions = {
+            "pending": ["processing", "cancelled"],
+            "processing": ["completed", "cancelled"],
+            "completed": ["cancelled"],
+            "cancelled": []
+        };
+
+        if (currentSale.status === "cancelled" && status !== "cancelled") {
+            return res.status(400).json({ 
+                message: "Cannot change status of a cancelled sale" 
+            });
+        }
+
+        if (!allowedTransitions[currentSale.status].includes(status)) {
+            return res.status(400).json({ 
+                message: `Cannot change status from ${currentSale.status} to ${status}` 
+            });
+        }
+        
+        // Manejar cambios de stock según el estado
+        if (currentSale.status !== status) {
+            if (status === "cancelled") {
+                // Restaurar stock al cancelar
+                for (const item of currentSale.products) {
+                    const product = await Product.findById(item.product);
+                    if (product && currentSale.status !== "cancelled") {
+                        await product.incrementStock(item.quantity);
+                    }
+                }
+            }
+            else if (currentSale.status === "pending" && status === "processing") {
+                // Reducir stock al comenzar procesamiento
+                for (const item of currentSale.products) {
+                    const product = await Product.findById(item.product);
+                    if (product) {
+                        if (product.stock >= item.quantity) {
+                            await product.decrementStock(item.quantity);
+                        } else {
+                            return res.status(400).json({
+                                message: "Cannot process sale because the product no longer has sufficient stock available",
+                                product: product.name
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        const updatedSale = await Sale.findByIdAndUpdate(
+            id,
+            { status },
+            { new: true, runValidators: true }
+        )
+            .populate("customer", "name email phone")
+            .populate("products.product", "name price");
+
+        const formattedSale = updatedSale.toObject();
+        
+        if (formattedSale.salesDate) {
+            formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
+        }
+
+        const statusMessages = {
+            "pending": "Sale status updated to pending",
+            "processing": "Sale is now being processed and stock has been reduced",
+            "completed": "Sale has been completed successfully",
+            "cancelled": "Sale has been cancelled and stock has been restored"
+        };
+
+        res.status(200).json({ 
+            message: statusMessages[status],
+            sale: formattedSale 
+        });
+    } catch (error) {
+        console.error("Error updating sale status:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
@@ -382,8 +380,7 @@ export const updateSale = async (req, res) => {
 // DELETE: Remove a sale by ID
 export const deleteSale = async (req, res) => {
     try {
-        // Check if req.user exists before accessing its role property
-        if (!req.user || !checkPermission(req.user.role, "delete_sales")) {
+        if (!checkPermission(req.user.role, "delete_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
@@ -393,11 +390,20 @@ export const deleteSale = async (req, res) => {
             return res.status(400).json({ message: "Invalid sale ID format" });
         }
 
-        const deletedSale = await Sale.findByIdAndDelete(id);
-
-        if (!deletedSale) {
+        const saleToDelete = await Sale.findById(id);
+        
+        if (!saleToDelete) {
             return res.status(404).json({ message: "Sale not found" });
         }
+        
+        // Solo permitir eliminar si está en pending o cancelled
+        if (!["pending", "cancelled"].includes(saleToDelete.status)) {
+            return res.status(400).json({ 
+                message: "Cannot delete sale that is already being processed or completed" 
+            });
+        }
+
+        await Sale.findByIdAndDelete(id);
 
         res.status(200).json({ message: "Sale deleted successfully" });
     } catch (error) {
@@ -406,439 +412,379 @@ export const deleteSale = async (req, res) => {
     }
 };
 
-// ===== EXPORT FUNCTIONS =====
-
-// GET: Generate a PDF report of sales
-export const exportSalesPDF = async (req, res) => {
+// EXPORT: Export sales to PDF
+export const exportSaleToPdf = async (req, res) => {
     try {
-        // Check if req.user exists before accessing its role property
-        if (!req.user || !checkPermission(req.user.role, "view_sales")) {
-            return res.status(403).json({ message: "Unauthorized access" });
+        if (!checkPermission(req.user.role, "view_sales")) {
+            return res.status(403).json({ message: "You don't have permission to generate reports" });
         }
 
-        const { startDate, endDate, customerId } = req.query;
-        const sales = await fetchFilteredSales(startDate, endDate, customerId);
+        const { startDate, endDate, customerId, productId, status } = req.query;
+        
+        if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+            return res.status(400).json({ 
+                message: "Start date cannot be later than end date" 
+            });
+        }
+        
+        let query = {};
+        
+        if (startDate || endDate) {
+            query.salesDate = {};
+            if (startDate) query.salesDate.$gte = new Date(startDate);
+            if (endDate) query.salesDate.$lte = new Date(endDate);
+        }
+        
+        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+            query.customer = customerId;
+        }
+        
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            query["products.product"] = productId;
+        }
+        
+        if (status && ["active", "cancelled"].includes(status)) {
+            query.status = status;
+        }
+
+        const sales = await Sale.find(query)
+            .sort({ salesDate: -1 })
+            .populate({
+                path: "customer",
+                select: "name email phone document_number"
+            })
+            .populate({
+                path: "products.product",
+                select: "name price category sku"
+            })
+            .lean();
             
         if (sales.length === 0) {
-            return res.status(404).json({ message: "No sales found for the specified criteria" });
+            return res.status(404).json({ 
+                message: "No sales found with the specified criteria" 
+            });
+        }
+
+        const companyName = "IceSoft";
+        let customerInfo = null;
+        let productInfo = null;
+        
+        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+            customerInfo = await Customer.findById(customerId).lean();
         }
         
-        const companyName = "IceSoft";
-        
-        // Create PDF document
-        const doc = new PDFDocument({
-            margin: 50,
-            size: 'A4',
-            info: {
-                Title: 'Informe de Ventas',
-                Author: companyName,
-                Creator: 'IceSoft System'
-            }
-        });
-        
-        // Set response headers
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            productInfo = await Product.findById(productId).lean();
+        }
+
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=informe-ventas-${Date.now()}.pdf`);
-        doc.pipe(res);
-        
-        // Define style constants
-        const styles = {
-            primary: '#336699',
-            secondary: '#f5f5f5',
-            text: '#333333',
-            headerText: '#ffffff',
-            border: '#cccccc'
+        res.setHeader('Content-Disposition', `attachment; filename=sales-report-${Date.now()}.pdf`);
+
+        const reportOptions = {
+            data: sales,
+            title: "Sales Report",
+            companyName: companyName,
+            filters: {
+                startDate,
+                endDate,
+                customer: customerInfo ? customerInfo.name : "All",
+                product: productInfo ? productInfo.name : "All",
+                status: status || "All"
+            },
+            columns: [
+                { header: "Sale ID", key: "id", width: 80 },
+                { header: "Date", key: "salesDate", width: 100, type: "date" },
+                { header: "Customer", key: "customerName", width: 120 },
+                { header: "Contact", key: "customerContact", width: 120 },
+                { header: "Products", key: "productsDetail", width: 300 },
+                { header: "Total Items", key: "totalItems", width: 70, align: "right" },
+                { header: "Sale Total", key: "total", width: 100, align: "right", type: "currency" },
+                { header: "Status", key: "status", width: 80 }
+            ],
+            formatData: (sale) => {
+                let productsDetail = "No products";
+                if (sale.products && sale.products.length > 0) {
+                    productsDetail = sale.products.map(item => {
+                        const productName = item.product?.name || "Unknown product";
+                        const quantity = item.quantity || 0;
+                        const salePrice = item.sale_price || 0;
+                        const itemTotal = item.total || (quantity * salePrice);
+                        const sku = item.product?.sku ? `(SKU: ${item.product.sku})` : '';
+                        
+                        return `${productName} ${sku}
+                        Qty: ${quantity} | Unit Price: $${salePrice.toFixed(2)} | Subtotal: $${itemTotal.toFixed(2)}`;
+                    }).join("\n\n");
+                }
+                
+                const totalItems = sale.products ? 
+                    sale.products.reduce((sum, item) => sum + (item.quantity || 0), 0) : 0;
+                
+                const customerContact = sale.customer ? 
+                    `${sale.customer.email || 'N/A'} | ${sale.customer.phone || 'N/A'}` : 
+                    'No contact info';
+                
+                return {
+                    id: sale.id || "N/A",
+                    salesDate: sale.salesDate ? new Date(sale.salesDate) : null,
+                    customerName: sale.customer?.name || "Unknown",
+                    customerContact: customerContact,
+                    productsDetail: productsDetail,
+                    totalItems: totalItems,
+                    total: sale.total || 0,
+                    status: sale.status || "N/A"
+                };
+            },
+            calculateSummary: (data) => {
+                const totalAmount = data.reduce((sum, sale) => sum + (sale.total || 0), 0);
+                const totalItems = data.reduce((sum, sale) => {
+                    if (sale.products) {
+                        return sum + sale.products.reduce((itemSum, item) => 
+                            itemSum + (item.quantity || 0), 0);
+                    }
+                    return sum;
+                }, 0);
+                
+                const activeCount = data.filter(s => s.status === 'active').length;
+                const cancelledCount = data.filter(s => s.status === 'cancelled').length;
+                
+                return {
+                    count: data.length,
+                    totalAmount,
+                    totalItems,
+                    activeCount,
+                    cancelledCount
+                };
+            },
+            pdfOptions: {
+                pageNumbers: true,
+                landscape: true,
+                detailedHeader: true,
+                detailedSummary: true
+            },
+            filename: `sales-report-${Date.now()}.pdf`
         };
         
-        // Format date and currency helpers
-        const now = new Date();
-        const formatCOP = (amount) => new Intl.NumberFormat('es-CO', { 
-            style: 'currency', currency: 'COP', minimumFractionDigits: 0 
-        }).format(amount);
+        try {
+            await generatePdfReport(reportOptions, res);
+        } catch (pdfError) {
+            console.error("Error generating PDF:", pdfError);
+            
+            if (!res.headersSent) {
+                return res.status(500).json({ 
+                    message: "Error generating PDF report", 
+                    error: pdfError.message 
+                });
+            }
+        }
         
-        // Add document header
-        addPDFHeader(doc, companyName, now, styles);
-        
-        // Add report info section
-        addPDFReportInfo(doc, startDate, endDate, customerId, styles);
-        
-        // Add summary section
-        const totalAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
-        addPDFSummary(doc, sales.length, totalAmount, styles);
-        
-        // Add sales table
-        addPDFSalesTable(doc, sales, styles, formatCOP);
-        
-        // Add footer to all pages
-        addPDFFooter(doc, companyName, styles);
-        
-        // Finalize PDF
-        doc.end();
     } catch (error) {
-        console.error("Error generating sales PDF report:", error);
-        res.status(500).json({ message: "Error generating PDF report", details: error.message });
+        console.error("Error generating PDF report:", error);
+        
+        if (!res.headersSent) {
+            return res.status(500).json({ 
+                message: "Error generating PDF report", 
+                error: error.message
+            });
+        }
     }
 };
 
-export const exportSalesExcel = async (req, res) => {
+// EXPORT: Export sales to Excel
+export const exportSaleToExcel = async (req, res) => {
     try {
-        // Check if req.user exists before accessing its role property
-        if (!req.user || !checkPermission(req.user.role, "view_sales")) {
-            return res.status(403).json({ message: "Unauthorized access" });
+        if (!checkPermission(req.user.role, "view_sales")) {
+            return res.status(403).json({ message: "You don't have permission to generate reports" });
+        }
+
+        const { startDate, endDate, customerId, productId, status } = req.query;
+        
+        if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+            return res.status(400).json({ 
+                message: "Start date cannot be later than end date" 
+            });
         }
         
-        const { startDate, endDate, customerId } = req.query;
-        const sales = await fetchFilteredSales(startDate, endDate, customerId);
+        let query = {};
+        
+        if (startDate || endDate) {
+            query.salesDate = {};
+            if (startDate) query.salesDate.$gte = new Date(startDate);
+            if (endDate) query.salesDate.$lte = new Date(endDate);
+        }
+        
+        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+            query.customer = customerId;
+        }
+        
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            query["products.product"] = productId;
+        }
+        
+        if (status && ["active", "cancelled"].includes(status)) {
+            query.status = status;
+        }
+
+        const sales = await Sale.find(query)
+            .sort({ salesDate: -1 })
+            .populate({
+                path: "customer",
+                select: "name email phone document_number"
+            })
+            .populate({
+                path: "products.product",
+                select: "name price category sku"
+            })
+            .lean();
             
         if (sales.length === 0) {
-            return res.status(404).json({ message: "No sales found for the specified criteria" });
+            return res.status(404).json({ 
+                message: "No sales found with the specified criteria" 
+            });
         }
 
-        // Create Excel workbook
-        const workbook = new ExcelJS.Workbook();
-        workbook.creator = 'IceSoft System';
-        workbook.created = new Date();
-        
-        // Add worksheet
-        const worksheet = workbook.addWorksheet('Informe de Ventas', {
-            pageSetup: { paperSize: 9, orientation: 'portrait', fitToWidth: 1 }
-        });
-        
-        // Define styles
-        const styles = defineExcelStyles();
-        
-        // Set column structure
-        setExcelColumns(worksheet);
-        
-        // Add header and info sections
-        addExcelHeader(worksheet, startDate, endDate, customerId, styles);
-        
-        // Calculate and add summary data
-        const totalSalesAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
-        const totalItemsSold = sales.reduce((sum, sale) => 
-            sum + sale.products.reduce((prodSum, prod) => prodSum + prod.quantity, 0), 0);
-        addExcelSummary(worksheet, sales.length, totalItemsSold, totalSalesAmount);
-        
-        // Add sales data
-        const tableStartRow = 13;
-        const rowNumber = addExcelSalesData(worksheet, sales, tableStartRow, styles);
-        
-        // Format columns
-        formatExcelColumns(worksheet);
-        
-        // Add totals row
-        addExcelTotalsRow(worksheet, rowNumber, totalSalesAmount, styles.totalStyle);
-        
-        // Add footer
-        addExcelFooter(worksheet, rowNumber);
-        
-        // Set response headers and send workbook
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=ventas-informe-${Date.now()}.xlsx`);
-        await workbook.xlsx.write(res);
-        res.end();
+        res.setHeader('Content-Disposition', `attachment; filename=sales-report-${Date.now()}.xlsx`);
+
+        let customerInfo = null;
+        let productInfo = null;
         
-    } catch (error) {
-        console.error("Error generating sales Excel report:", error);
-        res.status(500).json({ message: "Error generating Excel report" });
-    }
-};
-
-// ==== Helper Functions ====
-
-// Shared function to fetch sales with filters
-async function fetchFilteredSales(startDate, endDate, customerId) {
-    // Build query object based on filters
-    let query = {};
-    
-    // Add date range filter
-    if (startDate || endDate) {
-        query.salesDate = {};
-        if (startDate) query.salesDate.$gte = new Date(startDate);
-        if (endDate) query.salesDate.$lte = new Date(endDate);
-    }
-    
-    // Add customer filter
-    if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
-        query.customer = customerId;
-    }
-    
-    // Fetch and return sales
-    return await Sale.find(query)
-        .sort({ salesDate: -1 })
-        .populate("customer", "name")
-        .populate("products.product", "name");
-}
-
-// ==== PDF Helper Functions ====
-
-function addPDFHeader(doc, companyName, now, styles) {
-    // Header background
-    doc.rect(50, 50, doc.page.width - 100, 80)
-       .fillAndStroke(styles.primary, styles.primary);
-    
-    // Company name and report title
-    doc.fillColor(styles.headerText)
-       .font('Helvetica-Bold')
-       .fontSize(24)
-       .text(companyName, 70, 70)
-       .fontSize(16)
-       .text('Informe de Ventas', 70, 100);
-    
-    // Date generated
-    doc.font('Helvetica')
-       .fontSize(10)
-       .text(`Generado: ${now.toLocaleDateString('es-CO')} ${now.toLocaleTimeString('es-CO')}`, 
-             70, 120, { align: 'left' });
-}
-
-function addPDFReportInfo(doc, startDate, endDate, customerId, styles) {
-    // Info section background
-    doc.rect(50, 150, doc.page.width - 100, 70)
-       .fillAndStroke(styles.secondary, styles.border);
-    
-    // Section title   
-    doc.fillColor(styles.text)
-       .fontSize(12)
-       .font('Helvetica-Bold')
-       .text('Parámetros del Informe:', 70, 160);
-    
-    // Info content
-    doc.font('Helvetica').fontSize(10);
-    let infoY = 180;
-    
-    // Date range
-    doc.text(`Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`, 70, infoY);
-    infoY += 15;
-    
-    // Customer info
-    if (customerId) {
-        Customer.findById(customerId).then(customer => {
-            if (customer) doc.text(`Cliente: ${customer.name}`, 70, infoY);
-        });
-    } else {
-        doc.text('Cliente: Todos', 70, infoY);
-    }
-}
-
-function addPDFSummary(doc, salesCount, totalAmount, styles) {
-    // Summary section background
-    doc.rect(50, 240, doc.page.width - 100, 60)
-       .fillAndStroke('#e6f7ff', styles.border);
-    
-    // Summary title
-    doc.fillColor(styles.text)
-       .fontSize(14)
-       .font('Helvetica-Bold')
-       .text('Resumen', 70, 250);
-    
-    // Summary content
-    doc.font('Helvetica').fontSize(10)
-       .text(`Total de Ventas: ${salesCount}`, 70, 270)
-       .text(`Total: ${new Intl.NumberFormat('es-CO', { 
-           style: 'currency', currency: 'COP', minimumFractionDigits: 0 
-       }).format(totalAmount)}`, 70, 285);
-}
-
-function addPDFSalesTable(doc, sales, styles, formatCOP) {
-    const tableTop = 320;
-    const tableHeaders = ['ID', 'Fecha', 'Cliente', 'Producto', 'Cantidad', 'Total'];
-    const colWidths = [60, 70, 90, 120, 60, 90];
-    
-    // Draw table header
-    doc.rect(50, tableTop, doc.page.width - 100, 20)
-       .fillAndStroke(styles.primary, styles.primary);
-    
-    // Add header text
-    let currentX = 50;
-    tableHeaders.forEach((header, i) => {
-        doc.font('Helvetica-Bold')
-           .fontSize(10)
-           .fillColor(styles.headerText)
-           .text(header, currentX + 5, tableTop + 6, 
-                { width: colWidths[i], align: i === 5 ? 'right' : 'left' });
-        currentX += colWidths[i];
-    });
-    
-    // Draw table rows
-    let y = tableTop + 20;
-    
-    for (let i = 0; i < sales.length; i++) {
-        const sale = sales[i];
+        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+            customerInfo = await Customer.findById(customerId).lean();
+        }
         
-        for (let j = 0; j < sale.products.length; j++) {
-            const product = sale.products[j];
-            
-            // Add new page if necessary
-            if (y > 700) {
-                doc.addPage();
-                y = 50;
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+            productInfo = await Product.findById(productId).lean();
+        }
+
+        const reportOptions = {
+            data: sales,
+            title: "Sales Report",
+            companyName: "IceSoft",
+            filters: {
+                dateRange: startDate && endDate ? `${startDate} to ${endDate}` : "All time",
+                customer: customerInfo ? customerInfo.name : "All",
+                product: productInfo ? productInfo.name : "All",
+                status: status || "All"
+            },
+            columns: [
+                { header: "Sale ID", key: "id", width: 15 },
+                { header: "Date", key: "salesDate", width: 15, type: "date" },
+                { header: "Customer", key: "customerName", width: 25 },
+                { header: "Customer Email", key: "customerEmail", width: 25 },
+                { header: "Customer Phone", key: "customerPhone", width: 20 },
+                { header: "Customer Document", key: "customerDocument", width: 20 },
+                { header: "Total Products", key: "totalProducts", width: 15, align: "right" },
+                { header: "Total Items", key: "totalItems", width: 15, align: "right" },
+                { header: "Total Amount", key: "total", width: 20, align: "right", type: "currency" },
+                { header: "Status", key: "status", width: 15 }
+            ],
+            detailedProductsColumns: [
+                { header: "Sale ID", key: "saleId", width: 15 },
+                { header: "Sale Date", key: "saleDate", width: 15, type: "date" },
+                { header: "Customer", key: "customerName", width: 25 },
+                { header: "Product ID", key: "productId", width: 25 },
+                { header: "Product Name", key: "productName", width: 30 },
+                { header: "Product SKU", key: "productSku", width: 20 },
+                { header: "Product Category", key: "productCategory", width: 20 },
+                { header: "Quantity", key: "quantity", width: 15, align: "right" },
+                { header: "Unit Price", key: "unitPrice", width: 20, align: "right", type: "currency" },
+                { header: "Item Total", key: "itemTotal", width: 20, align: "right", type: "currency" },
+                { header: "Sale Status", key: "saleStatus", width: 15 }
+            ],
+            formatData: (sale) => {
+                const totalItems = sale.products ? 
+                    sale.products.reduce((sum, item) => sum + (item.quantity || 0), 0) : 0;
+                const totalProducts = sale.products ? sale.products.length : 0;
                 
-                // Redraw header on new page
-                currentX = 50;
-                doc.rect(50, y, doc.page.width - 100, 20)
-                   .fillAndStroke(styles.primary, styles.primary);
-                   
-                tableHeaders.forEach((header, i) => {
-                    doc.font('Helvetica-Bold')
-                       .fontSize(10)
-                       .fillColor(styles.headerText)
-                       .text(header, currentX + 5, y + 6, 
-                            { width: colWidths[i], align: i === 5 ? 'right' : 'left' });
-                    currentX += colWidths[i];
+                return {
+                    id: sale.id || "N/A",
+                    salesDate: sale.salesDate ? new Date(sale.salesDate) : null,
+                    customerName: sale.customer?.name || "Unknown",
+                    customerEmail: sale.customer?.email || "N/A",
+                    customerPhone: sale.customer?.phone || "N/A",
+                    customerDocument: sale.customer?.document_number || "N/A",
+                    totalProducts: totalProducts,
+                    totalItems: totalItems,
+                    total: sale.total || 0,
+                    status: sale.status || "N/A",
+                    _originalData: sale
+                };
+            },
+            formatDetailedProductsData: (sales) => {
+                const detailedRows = [];
+                
+                sales.forEach(sale => {
+                    if (sale._originalData.products && sale._originalData.products.length > 0) {
+                        sale._originalData.products.forEach(item => {
+                            detailedRows.push({
+                                saleId: sale.id,
+                                saleDate: sale.salesDate,
+                                customerName: sale.customerName,
+                                productId: item.product?._id?.toString() || "N/A",
+                                productName: item.product?.name || "Unknown product",
+                                productSku: item.product?.sku || "N/A",
+                                productCategory: item.product?.category || "N/A",
+                                quantity: item.quantity || 0,
+                                unitPrice: item.sale_price || 0,
+                                itemTotal: item.total || ((item.quantity || 0) * (item.sale_price || 0)),
+                                saleStatus: sale.status
+                            });
+                        });
+                    }
                 });
                 
-                y += 20;
-            }
-            
-            // Row background (alternating)
-            doc.rect(50, y, doc.page.width - 100, 20)
-               .fillAndStroke((i + j) % 2 === 0 ? '#f9f9f9' : '#ffffff', styles.border);
-            
-            // Row data
-            doc.font('Helvetica').fontSize(9).fillColor(styles.text);
-            
-            currentX = 50;
-            
-            // Add cell data
-            doc.text(sale.id, currentX + 5, y + 6, { width: colWidths[0] });
-            currentX += colWidths[0];
-            
-            doc.text(new Date(sale.salesDate).toLocaleDateString('es-CO'), currentX + 5, y + 6, { width: colWidths[1] });
-            currentX += colWidths[1];
-            
-            doc.text(sale.customer ? sale.customer.name : 'Desconocido', currentX + 5, y + 6, { width: colWidths[2] });
-            currentX += colWidths[2];
-            
-            doc.text(product.product ? product.product.name : 'Desconocido', currentX + 5, y + 6, { width: colWidths[3] });
-            currentX += colWidths[3];
-            
-            doc.text(product.quantity.toString(), currentX + 5, y + 6, { width: colWidths[4], align: 'center' });
-            currentX += colWidths[4];
-            
-            doc.text(formatCOP(product.total), currentX + 5, y + 6, { width: colWidths[5], align: 'right' });
-            
-            y += 20;
-        }
-    }
-}
-
-function addPDFFooter(doc, companyName, styles) {
-    const pageCount = doc.bufferedPageRange().count;
-    
-    for (let i = 0; i < pageCount; i++) {
-        doc.switchToPage(i);
+                return detailedRows;
+            },
+            calculateSummary: (data) => {
+                const totalAmount = data.reduce((sum, sale) => sum + (sale.total || 0), 0);
+                const totalItems = data.reduce((sum, sale) => sum + sale.totalItems, 0);
+                const totalProducts = data.reduce((sum, sale) => sum + sale.totalProducts, 0);
+                const uniqueCustomers = new Set(data.map(s => s.customerName)).size;
+                
+                const activeCount = data.filter(s => s.status === 'active').length;
+                const cancelledCount = data.filter(s => s.status === 'cancelled').length;
+                
+                return {
+                    count: data.length,
+                    totalAmount,
+                    totalItems,
+                    totalProducts,
+                    uniqueCustomers,
+                    activeCount,
+                    cancelledCount
+                };
+            },
+            excelOptions: {
+                multipleSheets: true,
+                sheetNames: ["Summary", "Product Details"],
+                includeFilters: true,
+                freezeHeader: true,
+                autoWidth: true
+            },
+            filename: `sales-report-${Date.now()}.xlsx`
+        };
         
-        // Page number
-        doc.font('Helvetica').fontSize(8).fillColor('#999999')
-           .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50,
-                 { align: 'center', width: doc.page.width - 100 });
-        
-        // Footer line
-        doc.moveTo(50, doc.page.height - 60)
-           .lineTo(doc.page.width - 50, doc.page.height - 60)
-           .stroke(styles.border);
-        
-        // Company footer
-        doc.font('Helvetica').fontSize(8).fillColor('#666666')
-           .text(`${companyName} - Sistema de Gestión de Ventas`, 50, doc.page.height - 40,
-                 { align: 'center', width: doc.page.width - 100 });
-    }
-}
-
-// ==== Excel Helper Functions ====
-
-function defineExcelStyles() {
-    return {
-        titleStyle: {
-            font: { bold: true, size: 16, color: { argb: 'FFFFFFFF' } },
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF336699' } },
-            alignment: { horizontal: 'center', vertical: 'middle' }
-        },
-        subtitleStyle: {
-            font: { bold: true, size: 12, color: { argb: 'FF333333' } },
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } },
-            alignment: { horizontal: 'left', vertical: 'middle' },
-            border: {
-                top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-            }
-        },
-        headerStyle: {
-            font: { bold: true, size: 11, color: { argb: 'FFFFFFFF' } },
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF336699' } },
-            alignment: { horizontal: 'center', vertical: 'middle' },
-            border: {
-                top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
-            }
-        },
-        rowEvenStyle: {
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
-        },
-        rowOddStyle: {
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } }
-        },
-        totalStyle: {
-            font: { bold: true, size: 11 },
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } },
-            alignment: { horizontal: 'right', vertical: 'middle' },
-            border: {
-                top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-                right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
+        try {
+            await generateExcelReport(reportOptions, res);
+        } catch (excelError) {
+            console.error("Error generating Excel file:", excelError);
+            
+            if (!res.headersSent) {
+                return res.status(500).json({ 
+                    message: "Error generating Excel report", 
+                    error: excelError.message 
+                });
             }
         }
-    };
-}
-
-function setExcelColumns(worksheet) {
-    worksheet.columns = [
-        { header: 'ID Venta', key: 'id', width: 15 },
-        { header: 'Fecha', key: 'date', width: 15 },
-        { header: 'Cliente', key: 'customer', width: 25 },
-        { header: 'Producto', key: 'product', width: 30 },
-        { header: 'Cantidad', key: 'quantity', width: 10 },
-        { header: 'Precio', key: 'price', width: 15 },
-        { header: 'Total Producto', key: 'productTotal', width: 15 },
-        { header: 'Total Venta', key: 'total', width: 15 }
-    ];
-}
-
-function addExcelHeader(worksheet, startDate, endDate, customerId, styles) {
-    // Add title
-    worksheet.mergeCells('A1:H2');
-    const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'Informe de Ventas - IceSoft';
-    titleCell.style = styles.titleStyle;
-    worksheet.getRow(1).height = 30;
-    
-    // Add report dates
-    worksheet.mergeCells('A3:H3');
-    const infoCell = worksheet.getCell('A3');
-    infoCell.value = `Período: ${startDate ? new Date(startDate).toLocaleDateString('es-CO') : 'Inicio'} a ${endDate ? new Date(endDate).toLocaleDateString('es-CO') : 'Fin'}`;
-    infoCell.style = { font: { size: 10 }, alignment: { horizontal: 'left', vertical: 'middle' } };
-    
-    // Add customer info
-    worksheet.mergeCells('A4:H4');
-    const customerCell = worksheet.getCell('A4');
-    if (customerId) {
-        Customer.findById(customerId).then(customer => {
-            customerCell.value = `Cliente: ${customer ? customer.name : 'No encontrado'}`;
-        });
-    } else {
-        customerCell.value = 'Cliente: Todos';
+        
+    } catch (error) {
+        console.error("Error generating Excel report:", error);
+        
+        if (!res.headersSent) {
+            return res.status(500).json({ 
+                message:                 "Error generating Excel report", 
+                error: error.message
+            });
+        }
     }
-    customerCell.style = { font: { size: 10 }, alignment: { horizontal: 'left', vertical: 'middle' } };
-    
-    // Add generation date
-    worksheet.mergeCells('A5:H5');
-    const dateCell = worksheet.getCell('A5');
-    dateCell.value = `Generado: ${new Date().toLocaleString('es-CO')}`;
-    dateCell.style = { font: { size: 10, italic: true }, alignment: { horizontal: 'left', vertical: 'middle' } };
-}
+};

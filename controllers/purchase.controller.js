@@ -74,10 +74,8 @@ export const getPurchases = async (req, res) => {
                 purchaseObj.purchase_date = new Date(purchaseObj.purchase_date).toISOString().split('T')[0];
             }
             
-            // Ensure quantity is included for each product
             if (purchaseObj.products && Array.isArray(purchaseObj.products)) {
                 purchaseObj.products = purchaseObj.products.map(item => {
-                    // Explicitly include quantity in the response
                     return {
                         ...item,
                         quantity: item.quantity || 0
@@ -122,10 +120,8 @@ export const getPurchaseById = async (req, res) => {
             formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
         }
         
-        // Ensure quantity is included for each product
         if (formattedPurchase.products && Array.isArray(formattedPurchase.products)) {
             formattedPurchase.products = formattedPurchase.products.map(item => {
-                // Explicitly include quantity in the response
                 return {
                     ...item,
                     quantity: item.quantity || 0
@@ -148,28 +144,23 @@ export const postPurchase = async (req, res) => {
         }
 
         const { products, provider, purchase_date } = req.body;
-        // Status is active by default in the model
 
-        // Data validation
         const validationErrors = validatePurchaseData(req.body);
         if (validationErrors.length > 0) {
             return res.status(400).json({ message: "Validation error", errors: validationErrors });
         }
 
-        // Verify provider
         const existingProvider = await Provider.findById(provider);
         if (!existingProvider) {
             return res.status(404).json({ message: "Provider not found" });
         }
 
-        // Process products
         let total = 0;
         let validatedProducts = [];
 
         for (let i = 0; i < products.length; i++) {
             const item = products[i];
             
-            // Verify product
             const foundProduct = await Product.findById(item.product);
             if (!foundProduct) {
                 return res.status(404).json({ message: `Product not found at index ${i}` });
@@ -179,7 +170,6 @@ export const postPurchase = async (req, res) => {
                 return res.status(400).json({ message: `Cannot use inactive product at index ${i}` });
             }
 
-            // Calculate total
             const itemTotal = item.purchase_price * item.quantity;
             
             validatedProducts.push({
@@ -191,21 +181,17 @@ export const postPurchase = async (req, res) => {
             
             total += itemTotal;
 
-            // Increment product stock - purchases are active by default
             await foundProduct.incrementStock(item.quantity);
         }
 
-        // Generate unique ID
         const id = await generatePurchaseId();
 
-        // Create new purchase
         const newPurchase = new Purchase({
             id,
             provider,
             products: validatedProducts,
             purchase_date: purchase_date || new Date(),
             total
-            // Status is active by default in the model
         });
 
         await newPurchase.save();
@@ -235,13 +221,11 @@ export const updatePurchase = async (req, res) => {
 
         const { id } = req.params;
         const { provider, purchase_date } = req.body;
-        // Status is handled in its own dedicated method
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Data validation
         const validationErrors = validatePurchaseData(req.body, true);
         if (validationErrors.length > 0) {
             return res.status(400).json({ message: "Validation error", errors: validationErrors });
@@ -249,7 +233,6 @@ export const updatePurchase = async (req, res) => {
 
         let updateFields = {};
 
-        // Verify fields to update
         if (provider) {
             const existingProvider = await Provider.findById(provider);
             if (!existingProvider) {
@@ -264,7 +247,6 @@ export const updatePurchase = async (req, res) => {
             return res.status(400).json({ message: "No valid fields to update" });
         }
 
-        // We don't allow updating products to avoid stock inconsistencies
         const updatedPurchase = await Purchase.findByIdAndUpdate(id, updateFields, {
             new: true,
             runValidators: true
@@ -295,7 +277,7 @@ export const updatePurchase = async (req, res) => {
     }
 };
 
-// Update purchase status
+// UPDATE: Purchase status
 export const updatePurchaseStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_purchases")) {
@@ -313,16 +295,13 @@ export const updatePurchaseStatus = async (req, res) => {
             return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
         }
 
-        // Get current purchase to check its previous state
         const currentPurchase = await Purchase.findById(id);
         
         if (!currentPurchase) {
             return res.status(404).json({ message: "Purchase not found" });
         }
         
-        // Only update stock if status is changing
         if (currentPurchase.status !== status) {
-            // If changing from active to inactive, decrement stock
             if (currentPurchase.status === "active" && status === "inactive") {
                 for (const item of currentPurchase.products) {
                     const product = await Product.findById(item.product);
@@ -338,7 +317,6 @@ export const updatePurchaseStatus = async (req, res) => {
                     }
                 }
             } 
-            // If changing from inactive to active, increment stock
             else if (currentPurchase.status === "inactive" && status === "active") {
                 for (const item of currentPurchase.products) {
                     const product = await Product.findById(item.product);
@@ -349,7 +327,6 @@ export const updatePurchaseStatus = async (req, res) => {
             }
         }
 
-        // Update purchase status
         const updatedPurchase = await Purchase.findByIdAndUpdate(
             id,
             { status },
@@ -387,19 +364,16 @@ export const deletePurchase = async (req, res) => {
             return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Find purchase before deleting to update stock
         const purchaseToDelete = await Purchase.findById(id);
         
         if (!purchaseToDelete) {
             return res.status(404).json({ message: "Purchase not found" });
         }
         
-        // Revert stock increases made by the purchase
         if (purchaseToDelete.status === "active" && purchaseToDelete.products && Array.isArray(purchaseToDelete.products)) {
             for (const item of purchaseToDelete.products) {
                 const product = await Product.findById(item.product);
                 if (product) {
-                    // Check if there's enough stock to decrement
                     if (product.stock >= item.quantity) {
                         await product.decrementStock(item.quantity);
                     } else {
@@ -412,7 +386,6 @@ export const deletePurchase = async (req, res) => {
             }
         }
 
-        // Delete the purchase
         await Purchase.findByIdAndDelete(id);
 
         res.status(200).json({ message: "Purchase deleted successfully and stock updated" });
@@ -422,7 +395,7 @@ export const deletePurchase = async (req, res) => {
     }
 };
 
-// Export purchases to PDF
+// EXPORT: Export purchases to PDF
 export const exportPurchaseToPdf = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_purchases")) {
@@ -437,7 +410,6 @@ export const exportPurchaseToPdf = async (req, res) => {
             });
         }
         
-        // Build query
         let query = {};
         
         if (startDate || endDate) {
@@ -454,21 +426,19 @@ export const exportPurchaseToPdf = async (req, res) => {
             query["products.product"] = productId;
         }
         
-        // Status filter
         if (status && ["active", "inactive"].includes(status)) {
             query.status = status;
         }
 
-        // Get data with full population of related fields
         const purchases = await Purchase.find(query)
             .sort({ purchase_date: -1 })
             .populate({
                 path: "provider",
-                select: "company name contact_name email phone address"
+                select: "company contact_name email phone"
             })
             .populate({
                 path: "products.product",
-                select: "name description price category sku"
+                select: "name price category sku"
             })
             .lean();
             
@@ -490,11 +460,9 @@ export const exportPurchaseToPdf = async (req, res) => {
             productInfo = await Product.findById(productId).lean();
         }
 
-        // Configure headers for PDF download
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.pdf`);
 
-        // Expanded columns with more detailed information
         const reportOptions = {
             data: purchases,
             title: "Purchase Report",
@@ -502,7 +470,7 @@ export const exportPurchaseToPdf = async (req, res) => {
             filters: {
                 startDate,
                 endDate,
-                provider: providerInfo ? providerInfo.name : "All",
+                provider: providerInfo ? providerInfo.company : "All",
                 product: productInfo ? productInfo.name : "All",
                 status: status || "All"
             },
@@ -510,35 +478,36 @@ export const exportPurchaseToPdf = async (req, res) => {
                 { header: "Purchase ID", key: "id", width: 80 },
                 { header: "Date", key: "purchase_date", width: 100, type: "date" },
                 { header: "Provider", key: "providerName", width: 120 },
-                { header: "Provider Contact", key: "providerContact", width: 120 },
-                { header: "Product Details", key: "productsDetail", width: 250 },
-                { header: "Total Items", key: "totalItems", width: 80, align: "right" },
-                { header: "Total Amount", key: "total", width: 100, align: "right", type: "currency" },
+                { header: "Contact", key: "providerContact", width: 120 },
+                { header: "Products", key: "productsDetail", width: 300 },
+                { header: "Total Items", key: "totalItems", width: 70, align: "right" },
+                { header: "Purchase Total", key: "total", width: 100, align: "right", type: "currency" },
                 { header: "Status", key: "status", width: 80 }
             ],
             formatData: (purchase) => {
-                // Format products with expanded details
                 let productsDetail = "No products";
                 if (purchase.products && purchase.products.length > 0) {
                     productsDetail = purchase.products.map(item => {
                         const productName = item.product?.name || "Unknown product";
+                        const quantity = item.quantity || 0;
+                        const purchasePrice = item.purchase_price || 0;
+                        const itemTotal = item.total || (quantity * purchasePrice);
                         const sku = item.product?.sku ? `(SKU: ${item.product.sku})` : '';
-                        const category = item.product?.category ? `[${item.product.category}]` : '';
-                        return `${productName} ${sku} ${category} - Qty: ${item.quantity} - Unit Price: $${item.purchase_price.toFixed(2)} - Subtotal: $${(item.quantity * item.purchase_price).toFixed(2)}`;
-                    }).join("\n");
+                        
+                        return `${productName} ${sku}
+                        Qty: ${quantity} | Unit Price: $${purchasePrice.toFixed(2)} | Subtotal: $${itemTotal.toFixed(2)}`;
+                    }).join("\n\n");
                 }
                 
-                // Calculate total items
-                const totalItems = purchase.products ? purchase.products.reduce((sum, item) => sum + item.quantity, 0) : 0;
+                const totalItems = purchase.products ? 
+                    purchase.products.reduce((sum, item) => sum + (item.quantity || 0), 0) : 0;
                 
-                // Format provider contact info
                 const providerContact = purchase.provider ? 
-                    `${purchase.provider.contact_name || 'N/A'} | ${purchase.provider.phone || 'N/A'} | ${purchase.provider.email || 'N/A'}` : 
+                    `${purchase.provider.contact_name || 'N/A'} | ${purchase.provider.phone || 'N/A'}` : 
                     'No contact info';
                 
-                // Format row data
                 return {
-                    id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
+                    id: purchase.id || "N/A",
                     purchase_date: purchase.purchase_date ? new Date(purchase.purchase_date) : null,
                     providerName: purchase.provider?.company || "Unknown",
                     providerContact: providerContact,
@@ -549,25 +518,30 @@ export const exportPurchaseToPdf = async (req, res) => {
                 };
             },
             calculateSummary: (data) => {
-                // Calculate summary information
                 const totalAmount = data.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
                 const totalItems = data.reduce((sum, purchase) => {
                     if (purchase.products) {
-                        return sum + purchase.products.reduce((itemSum, item) => itemSum + item.quantity, 0);
+                        return sum + purchase.products.reduce((itemSum, item) => 
+                            itemSum + (item.quantity || 0), 0);
                     }
                     return sum;
                 }, 0);
                 
+                const activeCount = data.filter(p => p.status === 'active').length;
+                const inactiveCount = data.filter(p => p.status === 'inactive').length;
+                
                 return {
                     count: data.length,
                     totalAmount,
-                    totalItems
+                    totalItems,
+                    activeCount,
+                    inactiveCount
                 };
             },
             pdfOptions: {
-                detailedHeader: true,
                 pageNumbers: true,
                 landscape: true,
+                detailedHeader: true,
                 detailedSummary: true
             },
             filename: `purchases-report-${Date.now()}.pdf`
@@ -598,7 +572,7 @@ export const exportPurchaseToPdf = async (req, res) => {
     }
 };
 
-// Export purchases to Excel
+// EXPORT: Export purchases to Excel
 export const exportPurchaseToExcel = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_purchases")) {
@@ -613,7 +587,6 @@ export const exportPurchaseToExcel = async (req, res) => {
             });
         }
         
-        // Build query
         let query = {};
         
         if (startDate || endDate) {
@@ -630,21 +603,19 @@ export const exportPurchaseToExcel = async (req, res) => {
             query["products.product"] = productId;
         }
         
-        // Status filter
         if (status && ["active", "inactive"].includes(status)) {
             query.status = status;
         }
 
-        // Get data with full population of related fields
         const purchases = await Purchase.find(query)
             .sort({ purchase_date: -1 })
             .populate({
                 path: "provider",
-                select: "company name contact_name email phone address"
+                select: "company contact_name email phone"
             })
             .populate({
                 path: "products.product",
-                select: "name description price category sku"
+                select: "name price category sku"
             })
             .lean();
             
@@ -654,7 +625,9 @@ export const exportPurchaseToExcel = async (req, res) => {
             });
         }
 
-        const companyName = "IceSoft";
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.xlsx`);
+
         let providerInfo = null;
         let productInfo = null;
         
@@ -666,84 +639,78 @@ export const exportPurchaseToExcel = async (req, res) => {
             productInfo = await Product.findById(productId).lean();
         }
 
-        // Configure headers for Excel download
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=purchases-report-${Date.now()}.xlsx`);
-
-        // Create a more detailed Excel report with multiple worksheets
         const reportOptions = {
             data: purchases,
             title: "Purchase Report",
-            companyName: companyName,
+            companyName: "IceSoft",
             filters: {
-                startDate,
-                endDate,
-                provider: providerInfo ? providerInfo.name : "All",
+                dateRange: startDate && endDate ? `${startDate} to ${endDate}` : "All time",
+                provider: providerInfo ? providerInfo.company : "All",
                 product: productInfo ? productInfo.name : "All",
                 status: status || "All"
             },
-            // Main summary worksheet columns
             columns: [
                 { header: "Purchase ID", key: "id", width: 15 },
                 { header: "Date", key: "purchase_date", width: 15, type: "date" },
                 { header: "Provider", key: "providerName", width: 25 },
-                { header: "Provider Contact", key: "providerContact", width: 40 },
+                { header: "Provider Contact", key: "providerContact", width: 25 },
+                { header: "Provider Email", key: "providerEmail", width: 25 },
+                { header: "Provider Phone", key: "providerPhone", width: 20 },
+                { header: "Total Products", key: "totalProducts", width: 15, align: "right" },
                 { header: "Total Items", key: "totalItems", width: 15, align: "right" },
-                { header: "Total Amount", key: "total", width: 15, align: "right", type: "currency" },
+                { header: "Total Amount", key: "total", width: 20, align: "right", type: "currency" },
                 { header: "Status", key: "status", width: 15 }
             ],
-            // Detailed product breakdown worksheet
             detailedProductsColumns: [
                 { header: "Purchase ID", key: "purchaseId", width: 15 },
-                { header: "Date", key: "purchaseDate", width: 15, type: "date" },
+                { header: "Purchase Date", key: "purchaseDate", width: 15, type: "date" },
                 { header: "Provider", key: "providerName", width: 25 },
+                { header: "Product ID", key: "productId", width: 25 },
                 { header: "Product Name", key: "productName", width: 30 },
-                { header: "Product SKU", key: "productSku", width: 15 },
-                { header: "Category", key: "productCategory", width: 20 },
+                { header: "Product SKU", key: "productSku", width: 20 },
+                { header: "Product Category", key: "productCategory", width: 20 },
                 { header: "Quantity", key: "quantity", width: 15, align: "right" },
-                { header: "Unit Price", key: "unitPrice", width: 15, align: "right", type: "currency" },
-                { header: "Subtotal", key: "subtotal", width: 15, align: "right", type: "currency" }
+                { header: "Unit Price", key: "unitPrice", width: 20, align: "right", type: "currency" },
+                { header: "Item Total", key: "itemTotal", width: 20, align: "right", type: "currency" },
+                { header: "Purchase Status", key: "purchaseStatus", width: 15 }
             ],
             formatData: (purchase) => {
-                // Calculate total items
-                const totalItems = purchase.products ? purchase.products.reduce((sum, item) => sum + item.quantity, 0) : 0;
+                const totalItems = purchase.products ? 
+                    purchase.products.reduce((sum, item) => sum + (item.quantity || 0), 0) : 0;
+                const totalProducts = purchase.products ? purchase.products.length : 0;
                 
-                // Format provider contact info
-                const providerContact = purchase.provider ? 
-                    `${purchase.provider.contact_name || 'N/A'} | ${purchase.provider.phone || 'N/A'} | ${purchase.provider.email || 'N/A'}` : 
-                    'No contact info';
-                
-                // Format row data for main summary
                 return {
-                    id: purchase.id || purchase._id?.toString().substring(0, 8) || "N/A",
+                    id: purchase.id || "N/A",
                     purchase_date: purchase.purchase_date ? new Date(purchase.purchase_date) : null,
                     providerName: purchase.provider?.company || "Unknown",
-                    providerContact: providerContact,
+                    providerContact: purchase.provider?.contact_name || "N/A",
+                    providerEmail: purchase.provider?.email || "N/A",
+                    providerPhone: purchase.provider?.phone || "N/A",
+                    totalProducts: totalProducts,
                     totalItems: totalItems,
                     total: purchase.total || 0,
                     status: purchase.status || "N/A",
-                    // Include original products array for detailed worksheet
-                    _products: purchase.products || []
+                    _originalData: purchase
                 };
             },
-            // Function to format data for the detailed products worksheet
             formatDetailedProductsData: (purchases) => {
-                // Flatten purchase data to product level for detailed worksheet
                 const detailedRows = [];
                 
                 purchases.forEach(purchase => {
-                    if (purchase._products && purchase._products.length > 0) {
-                        purchase._products.forEach(item => {
+                    if (purchase._originalData.products && purchase._originalData.products.length > 0) {
+                        purchase._originalData.products.forEach(item => {
                             detailedRows.push({
                                 purchaseId: purchase.id,
                                 purchaseDate: purchase.purchase_date,
                                 providerName: purchase.providerName,
+                                productId: item.product?._id?.toString() || "N/A",
                                 productName: item.product?.name || "Unknown product",
                                 productSku: item.product?.sku || "N/A",
                                 productCategory: item.product?.category || "N/A",
                                 quantity: item.quantity || 0,
                                 unitPrice: item.purchase_price || 0,
-                                subtotal: (item.quantity * item.purchase_price) || 0
+                                itemTotal: item.total || ((item.quantity || 0) * (item.purchase_price || 0)),
+                                purchaseStatus: purchase.status
                             });
                         });
                     }
@@ -752,34 +719,36 @@ export const exportPurchaseToExcel = async (req, res) => {
                 return detailedRows;
             },
             calculateSummary: (data) => {
-                // Calculate summary information
                 const totalAmount = data.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
                 const totalItems = data.reduce((sum, purchase) => sum + purchase.totalItems, 0);
-                const activeCount = data.filter(purchase => purchase.status === 'active').length;
-                const inactiveCount = data.filter(purchase => purchase.status === 'inactive').length;
+                const totalProducts = data.reduce((sum, purchase) => sum + purchase.totalProducts, 0);
+                const uniqueProviders = new Set(data.map(p => p.providerName)).size;
+                
+                const activeCount = data.filter(p => p.status === 'active').length;
+                const inactiveCount = data.filter(p => p.status === 'inactive').length;
                 
                 return {
                     count: data.length,
                     totalAmount,
                     totalItems,
+                    totalProducts,
+                    uniqueProviders,
                     activeCount,
                     inactiveCount
                 };
             },
-            // Excel-specific options
             excelOptions: {
-                multipleSheets: true, // Create multiple worksheets
-                sheetNames: ["Summary", "Detailed Products"], // Names for the worksheets
-                includeFilters: true, // Add filter buttons to columns
-                freezeHeader: true, // Freeze the header row
-                includeCharts: true // Include summary charts if supported
+                multipleSheets: true,
+                sheetNames: ["Summary", "Product Details"],
+                includeFilters: true,
+                freezeHeader: true,
+                autoWidth: true
             },
             filename: `purchases-report-${Date.now()}.xlsx`
         };
         
         try {
             await generateExcelReport(reportOptions, res);
-            console.log("Excel file generated and sent successfully");
         } catch (excelError) {
             console.error("Error generating Excel file:", excelError);
             

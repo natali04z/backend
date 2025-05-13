@@ -13,6 +13,9 @@ import purchaseRoutes from "./routes/purchase.routes.js";
 import salesRoutes from './routes/sales.routes.js';
 import customerRoutes from "./routes/customer.routes.js";
 import branchesRoutes from "./routes/branches.routes.js";
+import permissionRoutes from "./routes/permission.routes.js";
+
+import { createInitialPermissions } from "./utils/permissions.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,6 +38,7 @@ app.use("/api/purchases", purchaseRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/branches", branchesRoutes);
+app.use("/api/permissions", permissionRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
