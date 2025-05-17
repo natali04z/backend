@@ -2,44 +2,11 @@ import User from "../models/user.js";
 import Role from "../models/role.js";
 import mongoose from "mongoose";
 
-// Mapeo de nombres de roles a español
-const roleTranslations = {
-    "admin": "Administrador",
-    "assistant": "Asistente", 
-    "employee": "Empleado",
-    // Añade más roles según sea necesario
-};
-
-// Función para procesar usuarios y añadir displayName para roles
-const processUserWithDisplayName = (user) => {
-    if (!user) return null;
-    
-    const userData = user.toObject ? user.toObject() : user;
-    
-    if (userData.role) {
-        if (typeof userData.role === 'string') {
-            // Solo tenemos el ID del rol, no podemos traducir
-            return userData;
-        } else if (userData.role && userData.role.name) {
-            // Añadir displayName para el rol
-            userData.role.displayName = roleTranslations[userData.role.name] || userData.role.name;
-        }
-    }
-    
-    return userData;
-};
-
 // Get all users
 export const getUsers = async (req, res) => {
     try {
-        const users = await User.find()
-            .select("-password")
-            .populate("role", "id name");
-        
-        // Añadir displayName para cada usuario
-        const usersWithDisplayNames = users.map(user => processUserWithDisplayName(user));
-        
-        res.status(200).json({ users: usersWithDisplayNames });
+        const users = await User.find().select("-password").populate("role", "name");
+        res.status(200).json({ users });
     } catch (error) {
         res.status(500).json({ message: "Error fetching users", error: error.message });
     }
@@ -61,18 +28,12 @@ export const getProfile = async (req, res) => {
             return res.status(401).json({ message: "User ID not found in authentication token" });
         }
         
-        const user = await User.findById(userId)
-            .select("-password")
-            .populate("role", "id name");
-            
+        const user = await User.findById(userId).select("-password").populate("role", "name");
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
         
-        // Procesar usuario para añadir displayName al rol
-        const processedUser = processUserWithDisplayName(user);
-        
-        res.status(200).json(processedUser);
+        res.status(200).json(user);
     } catch (error) {
         res.status(500).json({ message: "Error fetching profile", error: error.message });
     }
@@ -87,18 +48,12 @@ export const getOneUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid user ID" });
         }
 
-        const user = await User.findById(id)
-            .select("-password")
-            .populate("role", "id name");
-            
+        const user = await User.findById(id).select("-password").populate("role", "name");
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        // Procesar usuario para añadir displayName al rol
-        const processedUser = processUserWithDisplayName(user);
-        
-        res.status(200).json(processedUser);
+        res.status(200).json(user);
     } catch (error) {
         res.status(500).json({ message: "Error fetching user", error: error.message });
     }
@@ -128,18 +83,15 @@ export const updateProfile = async (req, res) => {
             userId,
             updateData,
             { new: true, runValidators: true }
-        ).select("-password").populate("role", "id name");
+        ).select("-password").populate("role", "name");
         
         if (!updatedUser) {
             return res.status(404).json({ message: "User not found" });
         }
         
-        // Procesar usuario para añadir displayName al rol
-        const processedUser = processUserWithDisplayName(updatedUser);
-        
         res.status(200).json({
             message: "Profile updated successfully",
-            user: processedUser
+            user: updatedUser
         });
     } catch (error) {
         res.status(500).json({ message: "Error updating profile", error: error.message });
@@ -216,18 +168,15 @@ export const putUser = async (req, res) => {
             id,
             updateData,
             { new: true, runValidators: true }
-        ).select("-password").populate("role", "id name");
+        ).select("-password").populate("role", "name");
 
         if (!updatedUser) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        // Procesar usuario para añadir displayName al rol
-        const processedUser = processUserWithDisplayName(updatedUser);
-
         res.status(200).json({
             message: "User updated successfully",
-            user: processedUser
+            user: updatedUser
         });
 
     } catch (error) {
@@ -278,18 +227,15 @@ export const updateUserStatus = async (req, res) => {
             id,
             { status },
             { new: true, runValidators: true }
-        ).select("-password").populate("role", "id name");
+        ).select("-password").populate("role", "name");
 
         if (!updatedUser) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        // Procesar usuario para añadir displayName al rol
-        const processedUser = processUserWithDisplayName(updatedUser);
-
         res.status(200).json({
             message: `User status updated to ${status}`,
-            user: processedUser
+            user: updatedUser
         });
 
     } catch (error) {
