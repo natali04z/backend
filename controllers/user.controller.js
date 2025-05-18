@@ -104,48 +104,6 @@ export const getOneUser = async (req, res) => {
     }
 };
 
-// Update own profile
-export const updateProfile = async (req, res) => {
-    try {
-        if (!req.user) {
-            return res.status(401).json({ message: "Authentication required" });
-        }
-        
-        let userId;
-        if (req.user._id) {
-            userId = req.user._id;
-        } else if (req.user.id) {
-            userId = req.user.id;
-        } else {
-            return res.status(401).json({ message: "User ID not found in authentication token" });
-        }
-        
-        const { name, lastname, contact_number, email } = req.body;
-
-        const updateData = { name, lastname, contact_number, email };
-        
-        const updatedUser = await User.findByIdAndUpdate(
-            userId,
-            updateData,
-            { new: true, runValidators: true }
-        ).select("-password").populate("role", "id name");
-        
-        if (!updatedUser) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        // Procesar usuario para añadir displayName al rol
-        const processedUser = processUserWithDisplayName(updatedUser);
-        
-        res.status(200).json({
-            message: "Profile updated successfully",
-            user: processedUser
-        });
-    } catch (error) {
-        res.status(500).json({ message: "Error updating profile", error: error.message });
-    }
-};
-
 // Update user
 export const putUser = async (req, res) => {
     try {
