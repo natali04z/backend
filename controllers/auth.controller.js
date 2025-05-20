@@ -12,7 +12,6 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        // Validación para que contact_number solo contenga números
         if (!/^\d+$/.test(contact_number)) {
             return res.status(400).json({ message: "Phone number must contain only digits" });
         }
@@ -55,7 +54,27 @@ export const registerUser = async (req, res) => {
         });
 
         await newUser.save();
-        await newUser.populate("role", "name");
+
+        await newUser.populate("role", "id name");
+
+        const roleTranslations = {
+            "admin": "Administrador",
+            "assistant": "Asistente", 
+            "employee": "Empleado"
+        };
+
+        const userResponse = {
+            name: newUser.name,
+            lastname: newUser.lastname,
+            contact_number: newUser.contact_number,
+            email: newUser.email,
+            status: newUser.status,
+            role: {
+                id: newUser.role.id,
+                name: newUser.role.name,
+                displayName: roleTranslations[newUser.role.name] || newUser.role.name
+            }
+        };
 
         const token = jwt.sign(
             { id: newUser._id, role: newUser.role._id },
@@ -66,14 +85,7 @@ export const registerUser = async (req, res) => {
         res.status(201).json({
             message: "User registered successfully",
             token,
-            user: {
-                name: newUser.name,
-                lastname: newUser.lastname,
-                contact_number: newUser.contact_number,
-                email: newUser.email,
-                role: newUser.role.name,
-                status: newUser.status
-            }
+            user: userResponse
         });
 
     } catch (error) {
