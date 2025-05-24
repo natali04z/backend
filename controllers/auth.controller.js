@@ -79,7 +79,7 @@ export const registerUser = async (req, res) => {
         const token = jwt.sign(
             { id: newUser._id, role: newUser.role._id },
             process.env.JWT_SECRET,
-            { expiresIn: "30m" }
+            { expiresIn: "24h" }
         );
 
         res.status(201).json({
@@ -135,7 +135,7 @@ export const loginUser = async (req, res) => {
         const token = jwt.sign(
             {id: user._id, role: user.role._id},
             process.env.JWT_SECRET,
-            { expiresIn: "30m" }
+            { expiresIn: "24h" }
         );
         
         res.json({
@@ -186,7 +186,7 @@ export const verifyEmail = async (req, res) => {
         // Si el usuario existe, enviar respuesta exitosa
         res.status(200).json({ 
             message: "Email verified successfully",
-            userId: user._id // Opcional: enviar el ID del usuario para usarlo en el siguiente paso
+            userId: user._id
         });
     } catch (error) {
         res.status(500).json({ message: "Error verifying email", error: error.message });
@@ -212,8 +212,7 @@ export const resetPassword = async (req, res) => {
         // Actualizar la contraseña
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         user.password = hashedPassword;
-        
-        // Limpiar cualquier token de restablecimiento existente
+
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
         

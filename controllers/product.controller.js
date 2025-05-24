@@ -15,6 +15,104 @@ async function generateProductId() {
     return `Pr${nextNumber}`;
 }
 
+// Función para verificar si un producto está activo y disponible para venta
+export const validateProductForSale = async (productId) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(productId)) {
+            return {
+                isValid: false,
+                message: "ID de producto inválido"
+            };
+        }
+
+        const product = await Product.findById(productId);
+
+        if (!product) {
+            return {
+                isValid: false,
+                message: "Producto no encontrado"
+            };
+        }
+
+        if (product.status !== "active") {
+            return {
+                isValid: false,
+                message: "El producto está inactivo y no puede ser vendido"
+            };
+        }
+
+        if (product.stock <= 0) {
+            return {
+                isValid: false,
+                message: "Producto sin stock disponible"
+            };
+        }
+
+        return {
+            isValid: true,
+            product: product
+        };
+    } catch (error) {
+        console.error("Error validating product for sale:", error);
+        return {
+            isValid: false,
+            message: "Error interno del servidor"
+        };
+    }
+};
+
+// Función para verificar productos próximos a vencer
+export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
+    try {
+        const currentDate = new Date();
+        const alertDate = new Date();
+        alertDate.setDate(currentDate.getDate() + daysBeforeExpiration);
+
+        const expiringProducts = await Product.find({
+            status: "active",
+            expirationDate: {
+                $gte: currentDate,
+                $lte: alertDate
+            }
+        })
+        .select("id name expirationDate stock category")
+        .populate("category", "name");
+
+        return expiringProducts.map(product => ({
+            id: product.id,
+            name: product.name,
+            expirationDate: product.expirationDate,
+            stock: product.stock,
+            category: product.category?.name,
+            daysUntilExpiration: Math.ceil((product.expirationDate - currentDate) / (1000 * 60 * 60 * 24))
+        }));
+    } catch (error) {
+        console.error("Error checking expiring products:", error);
+        return [];
+    }
+};
+
+// Función para obtener notificaciones de productos próximos a vencer
+export const getExpirationNotifications = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "view_products")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const daysBeforeExpiration = req.query.days ? parseInt(req.query.days) : 7;
+        const expiringProducts = await checkExpiringProducts(daysBeforeExpiration);
+
+        res.status(200).json({
+            message: `Productos próximos a vencer en los próximos ${daysBeforeExpiration} días`,
+            count: expiringProducts.length,
+            products: expiringProducts
+        });
+    } catch (error) {
+        console.error("Error getting expiration notifications:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 // Get all products
 export const getProducts = async (req, res) => {
     try {
@@ -26,7 +124,16 @@ export const getProducts = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        res.status(200).json(products);
+        // Verificar productos próximos a vencer
+        const expiringProducts = await checkExpiringProducts();
+        
+        res.status(200).json({
+            products,
+            expiringProductsAlert: expiringProducts.length > 0 ? {
+                message: `Tienes ${expiringProducts.length} producto(s) próximo(s) a vencer`,
+                count: expiringProducts.length
+            } : null
+        });
     } catch (error) {
         console.error("Error fetching products:", error);
         res.status(500).json({ message: "Server error" });
@@ -54,7 +161,19 @@ export const getProductById = async (req, res) => {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        res.status(200).json(product);
+        // Verificar si el producto está próximo a vencer
+        const currentDate = new Date();
+        const daysUntilExpiration = Math.ceil((product.expirationDate - currentDate) / (1000 * 60 * 60 * 24));
+        
+        const response = {
+            ...product.toObject(),
+            expirationAlert: daysUntilExpiration <= 7 && daysUntilExpiration > 0 ? {
+                message: `Este producto vence en ${daysUntilExpiration} día(s)`,
+                daysUntilExpiration
+            } : null
+        };
+
+        res.status(200).json(response);
     } catch (error) {
         console.error("Error fetching product:", error);
         res.status(500).json({ message: "Server error" });
@@ -111,6 +230,10 @@ export const postProduct = async (req, res) => {
             return res.status(400).json({ message: "Expiration date must be after batch date" });
         }
 
+        // Verificar si el producto se está creando próximo a la fecha de vencimiento
+        const currentDate = new Date();
+        const daysUntilExpiration = Math.ceil((expirationDateObj - currentDate) / (1000 * 60 * 60 * 24));
+        
         const id = await generateProductId();
         const newProduct = new Product({
             id,
@@ -128,10 +251,20 @@ export const postProduct = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
         
-        res.status(201).json({ 
+        const response = { 
             message: "Product created successfully. Stock starts at 0 and will increase with purchases.", 
             product: savedProduct 
-        });
+        };
+
+        // Agregar alerta si el producto vence pronto
+        if (daysUntilExpiration <= 30 && daysUntilExpiration > 0) {
+            response.expirationAlert = {
+                message: `Advertencia: Este producto vence en ${daysUntilExpiration} día(s)`,
+                daysUntilExpiration
+            };
+        }
+        
+        res.status(201).json(response);
     } catch (error) {
         console.error("Error creating product:", error);
         res.status(500).json({ message: "Server error", error: error.message });
@@ -225,7 +358,23 @@ export const updateProduct = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        res.status(200).json({ message: "Product updated successfully", product: updatedProduct });
+        // Verificar si el producto actualizado está próximo a vencer
+        const currentDate = new Date();
+        const daysUntilExpiration = Math.ceil((updatedProduct.expirationDate - currentDate) / (1000 * 60 * 60 * 24));
+        
+        const response = { 
+            message: "Product updated successfully", 
+            product: updatedProduct 
+        };
+
+        if (daysUntilExpiration <= 7 && daysUntilExpiration > 0) {
+            response.expirationAlert = {
+                message: `Advertencia: Este producto vence en ${daysUntilExpiration} día(s)`,
+                daysUntilExpiration
+            };
+        }
+
+        res.status(200).json(response);
     } catch (error) {
         console.error("Error updating product:", error);
         res.status(500).json({ message: "Server error", error: error.message });
@@ -262,10 +411,17 @@ export const updateProductStatus = async (req, res) => {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        res.status(200).json({ 
+        const response = { 
             message: `Product ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
             product: updatedProduct 
-        });
+        };
+
+        // Agregar advertencia si se está desactivando un producto
+        if (status === 'inactive') {
+            response.warning = "El producto ha sido desactivado y no podrá ser vendido hasta que se reactive";
+        }
+
+        res.status(200).json(response);
     } catch (error) {
         console.error("Error updating product status:", error);
         res.status(500).json({ message: "Server error" });
