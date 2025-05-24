@@ -8,7 +8,7 @@ import {
 } from "../controllers/sales.controller.js";
 
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
-import { validateProductsForSale } from "../middlewares/sales-validation.js";
+import { validateProductsForSale } from "../middlewares/sales-validation.middleware.js";
 
 const router = express.Router();
 
