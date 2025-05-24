@@ -10,7 +10,7 @@ import {
     updateCustomerStatus,
     validateCustomerForSale  // Nueva función importada
 } from '../controllers/customer.controller.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
