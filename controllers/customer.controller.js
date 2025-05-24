@@ -11,7 +11,7 @@ const formatDate = (date) => {
   });
 };
 
-// Obtener todos los clientes
+// Obtener todos los clientes (sin cambios - ya devuelve activos e inactivos)
 export const getCustomers = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_customers")) {
@@ -79,6 +79,88 @@ export const getCustomerById = async (req, res) => {
     }
 };
 
+// NUEVA FUNCIÓN: Validar cliente para uso en ventas
+export const validateCustomerForSale = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "view_customers")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid customer ID" });
+        }
+
+        const customer = await Customer.findById(id)
+            .select("name lastname email phone status isDefault");
+
+        if (!customer) {
+            return res.status(404).json({ 
+                message: "Customer not found",
+                isValid: false,
+                canProceed: false
+            });
+        }
+
+        // Verificar si el cliente está activo
+        if (customer.status === 'inactive') {
+            return res.status(200).json({ 
+                message: `El cliente ${customer.name} ${customer.lastname} está inactivo y no puede ser usado en ventas. Por favor reactívalo o selecciona otro cliente.`,
+                isValid: false,
+                canProceed: false,
+                customer: {
+                    id: customer._id,
+                    name: customer.name,
+                    lastname: customer.lastname,
+                    email: customer.email,
+                    phone: customer.phone,
+                    status: customer.status,
+                    isDefault: customer.isDefault,
+                    fullName: `${customer.name} ${customer.lastname}`
+                },
+                statusInfo: {
+                    status: customer.status,
+                    statusText: 'Inactivo',
+                    canUseInSales: false,
+                    warningMessage: 'Este cliente no puede ser usado en ventas hasta que sea reactivado.'
+                }
+            });
+        }
+
+        // Cliente activo - puede ser usado
+        return res.status(200).json({ 
+            message: `Cliente ${customer.name} ${customer.lastname} está activo y puede ser usado en ventas.`,
+            isValid: true,
+            canProceed: true,
+            customer: {
+                id: customer._id,
+                name: customer.name,
+                lastname: customer.lastname,
+                email: customer.email,
+                phone: customer.phone,
+                status: customer.status,
+                isDefault: customer.isDefault,
+                fullName: `${customer.name} ${customer.lastname}`
+            },
+            statusInfo: {
+                status: customer.status,
+                statusText: 'Activo',
+                canUseInSales: true,
+                successMessage: 'Este cliente puede ser usado en ventas.'
+            }
+        });
+
+    } catch (error) {
+        console.error("Error validating customer for sale:", error);
+        res.status(500).json({ 
+            message: "Server error",
+            isValid: false,
+            canProceed: false
+        });
+    }
+};
+
 // Obtener cliente predeterminado
 export const getDefaultCustomer = async (req, res) => {
     try {
@@ -143,19 +225,6 @@ export const createCustomer = async (req, res) => {
         });
 
         await newCustomer.save();
-        res.status(201).json({ 
-            message: "Customer created successfully", 
-            customer: {
-                id: newCustomer._id,
-                name: newCustomer.name,
-                lastname: newCustomer.lastname,
-                email: newCustomer.email,
-                phone: newCustomer.phone,
-                status: newCustomer.status,
-                isDefault: newCustomer.isDefault,
-                createdAt: formatDate(newCustomer.createdAt),
-            }
-        });
     } catch (error) {
         console.error("Error creating customer:", error);
         res.status(500).json({ message: "Server error" });
@@ -208,20 +277,6 @@ export const updateCustomer = async (req, res) => {
         if (!updatedCustomer) {
             return res.status(404).json({ message: "Customer not found" });
         }
-
-        res.status(200).json({ 
-            message: "Customer updated successfully", 
-            customer: {
-                id: updatedCustomer._id,
-                name: updatedCustomer.name,
-                lastname: updatedCustomer.lastname,
-                email: updatedCustomer.email,
-                phone: updatedCustomer.phone,
-                status: updatedCustomer.status,
-                isDefault: updatedCustomer.isDefault,
-                createdAt: formatDate(updatedCustomer.createdAt),
-            }
-        });
     } catch (error) {
         console.error("Error updating customer:", error);
         res.status(500).json({ message: "Server error" });
@@ -291,20 +346,6 @@ export const updateCustomerStatus = async (req, res) => {
         if (!updatedCustomer) {
             return res.status(404).json({ message: "Customer not found" });
         }
-
-        res.status(200).json({ 
-            message: "Customer status updated successfully", 
-            customer: {
-                id: updatedCustomer._id,
-                name: updatedCustomer.name,
-                lastname: updatedCustomer.lastname,
-                email: updatedCustomer.email,
-                phone: updatedCustomer.phone,
-                status: updatedCustomer.status,
-                isDefault: updatedCustomer.isDefault,
-                createdAt: formatDate(updatedCustomer.createdAt),
-            }
-        });
     } catch (error) {
         console.error("Error updating customer status:", error);
         res.status(500).json({ message: "Server error" });

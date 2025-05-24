@@ -1,22 +1,29 @@
-import express from "express";
-import {
-    getCustomers,
-    getCustomerById,
-    createCustomer,
-    updateCustomer,
-    deleteCustomer,
-    updateCustomerStatus
-} from "../controllers/customer.controller.js";
-
-import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
+// En tu archivo de rutas (routes/customers.js o similar)
+import express from 'express';
+import { 
+    getCustomers, 
+    getCustomerById, 
+    getDefaultCustomer,
+    createCustomer, 
+    updateCustomer, 
+    deleteCustomer, 
+    updateCustomerStatus,
+    validateCustomerForSale  // Nueva función importada
+} from '../controllers/customerController.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.get("/", authenticateUser, authorizePermission("view_customers"), getCustomers);
-router.get("/:id", authenticateUser, authorizePermission("view_customers_id"), getCustomerById);
-router.post("/", authenticateUser, authorizePermission("create_customers"), createCustomer);
-router.put("/:id", authenticateUser, authorizePermission("update_customers"), updateCustomer);
-router.delete("/:id", authenticateUser, authorizePermission("delete_customers"), deleteCustomer);
-router.patch("/:id/status", authenticateUser, authorizePermission("update_customers_status"), updateCustomerStatus);
+// Rutas existentes
+router.get('/', authenticateToken, getCustomers);
+router.get('/default', authenticateToken, getDefaultCustomer);
+router.get('/:id', authenticateToken, getCustomerById);
+router.post('/', authenticateToken, createCustomer);
+router.put('/:id', authenticateToken, updateCustomer);
+router.delete('/:id', authenticateToken, deleteCustomer);
+router.patch('/:id/status', authenticateToken, updateCustomerStatus);
+
+// Nueva ruta para validar cliente en ventas
+router.get('/:id/validate-sale', authenticateToken, validateCustomerForSale);
 
 export default router;
