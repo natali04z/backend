@@ -6,7 +6,6 @@ import {
     deleteUser, 
     updateUserStatus,
     getProfile,
-    updateProfile  
 } from "../controllers/user.controller.js";
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
 
