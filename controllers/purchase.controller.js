@@ -210,7 +210,7 @@ export const postPurchase = async (req, res) => {
     }
 };
 
-// UPDATE: Deactivate purchase (one-way only)
+// UPDATE: Deactivate purchase (with reason)
 export const deactivatePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_purchases")) {
@@ -218,9 +218,17 @@ export const deactivatePurchase = async (req, res) => {
         }
 
         const { id } = req.params;
+        const { reason } = req.body; // Nuevo campo para el motivo
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid purchase ID format" });
+        }
+
+        // Validar que se proporcione un motivo
+        if (!reason || reason.trim().length === 0) {
+            return res.status(400).json({ 
+                message: "Deactivation reason is required" 
+            });
         }
 
         const purchase = await Purchase.findById(id);
@@ -259,7 +267,12 @@ export const deactivatePurchase = async (req, res) => {
 
         const updatedPurchase = await Purchase.findByIdAndUpdate(
             id,
-            { status: "inactive" },
+            { 
+                status: "inactive",
+                deactivation_reason: reason.trim(),
+                deactivated_at: new Date(),
+                deactivated_by: req.user.id // ID del usuario que desactivó
+            },
             { new: true, runValidators: true }
         )
             .populate("provider", "company")
@@ -277,6 +290,91 @@ export const deactivatePurchase = async (req, res) => {
         });
     } catch (error) {
         console.error("Error deactivating purchase:", error);
+        res.status(500).json({ message: "Server error", details: error.message });
+    }
+};
+
+// NEW: Reactivate purchase (solo para administradores)
+export const reactivatePurchase = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "reactivate_purchases")) {
+            return res.status(403).json({ message: "Unauthorized access - Admin only" });
+        }
+
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid purchase ID format" });
+        }
+
+        // Validar que se proporcione un motivo para la reactivación
+        if (!reason || reason.trim().length === 0) {
+            return res.status(400).json({ 
+                message: "Reactivation reason is required" 
+            });
+        }
+
+        const purchase = await Purchase.findById(id);
+        
+        if (!purchase) {
+            return res.status(404).json({ message: "Purchase not found" });
+        }
+
+        if (purchase.status !== "inactive") {
+            return res.status(400).json({ 
+                message: "Purchase is already active or cannot be reactivated" 
+            });
+        }
+
+        // Verificar que los productos aún existen y están activos
+        for (const item of purchase.products) {
+            const product = await Product.findById(item.product);
+            if (!product) {
+                return res.status(400).json({
+                    message: `Cannot reactivate purchase. Product no longer exists`
+                });
+            }
+            if (product.status !== "active") {
+                return res.status(400).json({
+                    message: `Cannot reactivate purchase. Product '${product.name}' is inactive`
+                });
+            }
+        }
+
+        // Revertir el stock (incrementar de nuevo)
+        for (const item of purchase.products) {
+            const product = await Product.findById(item.product);
+            if (product) {
+                await product.incrementStock(item.quantity);
+            }
+        }
+
+        const updatedPurchase = await Purchase.findByIdAndUpdate(
+            id,
+            { 
+                status: "active",
+                reactivation_reason: reason.trim(),
+                reactivated_at: new Date(),
+                reactivated_by: req.user.id
+            },
+            { new: true, runValidators: true }
+        )
+            .populate("provider", "company")
+            .populate("products.product", "name price");
+
+        const formattedPurchase = updatedPurchase.toObject();
+        
+        if (formattedPurchase.purchase_date) {
+            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+        }
+
+        res.status(200).json({ 
+            message: "Purchase reactivated successfully and stock restored", 
+            purchase: formattedPurchase 
+        });
+    } catch (error) {
+        console.error("Error reactivating purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
