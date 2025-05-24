@@ -13,7 +13,6 @@ import { authenticateUser, authorizePermission } from "../middlewares/auth.middl
 const router = Router();
 
 router.get("/profile/me", authenticateUser, getProfile);
-router.put("/profile/me", authenticateUser, updateProfile);
 router.get("/", authenticateUser, authorizePermission("view_users"), getUsers);
 router.get("/:id", authenticateUser, authorizePermission("view_users_id"), getOneUser);
 router.put("/:id", authenticateUser, authorizePermission("update_users"), putUser);
