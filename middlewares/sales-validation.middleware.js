@@ -1,4 +1,4 @@
-import { validateProductForSale } from "../controllers/productController.js";
+import { validateProductForSale } from "../controllers/product.controller.js";
 
 export const validateProductsForSale = async (req, res, next) => {
     try {
