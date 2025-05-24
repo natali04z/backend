@@ -1,11 +1,19 @@
 import mongoose from "mongoose";
 
 const CustomerSchema = new mongoose.Schema({
-  name: { type: String, required: true, trim: true },
-  lastname: { type: String, required: true, trim: true },
-  phone: { 
+  name: { 
     type: String, 
     required: true, 
+    trim: true 
+  },
+  lastname: { 
+    type: String, 
+    required: true, 
+    trim: true 
+  },
+  phone: {
+    type: String,
+    required: true,
     trim: true,
     validate: {
       validator: function(v) {
@@ -14,14 +22,49 @@ const CustomerSchema = new mongoose.Schema({
       message: props => `${props.value} is not a valid phone number. Phone must contain only digits`
     }
   },
-  email: { type: String, unique: true, required: true, trim: true },
-  createdAt: { type: Date, default: Date.now },
-  status: { type: String, enum: ['active', 'inactive'], default: 'active' }
+  email: { 
+    type: String, 
+    unique: true, 
+    required: true, 
+    trim: true,
+    lowercase: true
+  },
+  createdAt: { 
+    type: Date, 
+    default: Date.now 
+  },
+  status: { 
+    type: String, 
+    enum: ['active', 'inactive'], 
+    default: 'active' 
+  },
+  isDefault: {
+    type: Boolean,
+    default: false
+  }
 });
 
-// Ensure only one default customer exists
+CustomerSchema.statics.getDefaultCustomer = async function() {
+  let defaultCustomer = await this.findOne({ isDefault: true });
+  
+  if (!defaultCustomer) {
+    defaultCustomer = new this({
+      name: "Cliente",
+      lastname: "Predeterminado",
+      phone: "0000000000",
+      email: "cliente.predeterminado@sistema.local",
+      isDefault: true,
+      status: 'active'
+    });
+    await defaultCustomer.save();
+  }
+  
+  return defaultCustomer;
+};
+
+// Asegurar solo un cliente predeterminado
 CustomerSchema.pre('save', async function(next) {
-  if (this.isDefault) {
+  if (this.isDefault && this.isNew) {
     await this.constructor.updateMany(
       { _id: { $ne: this._id }, isDefault: true },
       { isDefault: false }
@@ -29,25 +72,6 @@ CustomerSchema.pre('save', async function(next) {
   }
   next();
 });
-
-// Static method to get the default customer
-CustomerSchema.statics.getDefaultCustomer = async function() {
-  let defaultCustomer = await this.findOne({ isDefault: true });
-  
-  // Create default customer if not exists
-  if (!defaultCustomer) {
-    defaultCustomer = new this({
-      name: "Guest",
-      lastname: "Customer",
-      phone: "0000000000",
-      email: "guest@example.com",
-      isDefault: true
-    });
-    await defaultCustomer.save();
-  }
-  
-  return defaultCustomer;
-};
 
 const Customer = mongoose.model("Customer", CustomerSchema);
 
