@@ -9,7 +9,7 @@ import {
     deleteCustomer, 
     updateCustomerStatus,
     validateCustomerForSale  // Nueva función importada
-} from '../controllers/customerController.js';
+} from '../controllers/customer.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
