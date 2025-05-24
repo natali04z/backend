@@ -30,7 +30,6 @@ export const getCustomers = async (req, res) => {
             email: customer.email,
             phone: customer.phone,
             status: customer.status,
-            isDefault: customer.isDefault,
             createdAt: formatDate(customer.createdAt)
         }));
 
@@ -68,7 +67,6 @@ export const getCustomerById = async (req, res) => {
             email: customer.email,
             phone: customer.phone,
             status: customer.status,
-            isDefault: customer.isDefault,
             createdAt: formatDate(customer.createdAt)
         };
 
@@ -116,7 +114,6 @@ export const validateCustomerForSale = async (req, res) => {
                     email: customer.email,
                     phone: customer.phone,
                     status: customer.status,
-                    isDefault: customer.isDefault,
                     fullName: `${customer.name} ${customer.lastname}`
                 },
                 statusInfo: {
@@ -177,7 +174,6 @@ export const getDefaultCustomer = async (req, res) => {
             email: defaultCustomer.email,
             phone: defaultCustomer.phone,
             status: defaultCustomer.status,
-            isDefault: defaultCustomer.isDefault,
             createdAt: formatDate(defaultCustomer.createdAt)
         };
 
@@ -188,7 +184,7 @@ export const getDefaultCustomer = async (req, res) => {
     }
 };
 
-// Crear un nuevo cliente
+// Crear un nuevo cliente - CORREGIDO
 export const createCustomer = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_customers")) {
@@ -197,6 +193,7 @@ export const createCustomer = async (req, res) => {
 
         const { name, lastname, email, phone, isDefault } = req.body;
 
+        // Validaciones
         if (!name || !lastname || !email || !phone) {
             return res.status(400).json({ message: "Name, lastname, email, and phone are required" });
         }
@@ -210,23 +207,50 @@ export const createCustomer = async (req, res) => {
             return res.status(400).json({ message: "Phone number must contain only digits" });
         }
 
+        // Verificar si el email ya existe
         const existingCustomer = await Customer.findOne({ email });
         if (existingCustomer) {
             return res.status(400).json({ message: "Customer with this email already exists" });
         }
 
+        // Crear nuevo cliente
         const newCustomer = new Customer({
-            name,
-            lastname,
-            email,
-            phone,
-            isDefault: isDefault || false,
+            name: name.trim(),
+            lastname: lastname.trim(),
+            email: email.trim().toLowerCase(),
+            phone: phone.trim(),
+            status: 'active',
             createdAt: new Date(),
         });
 
-        await newCustomer.save();
+        const savedCustomer = await newCustomer.save();
+
+        // RESPUESTA CORREGIDA
+        const formattedCustomer = {
+            id: savedCustomer._id,
+            name: savedCustomer.name,
+            lastname: savedCustomer.lastname,
+            email: savedCustomer.email,
+            phone: savedCustomer.phone,
+            status: savedCustomer.status,
+            isDefault: savedCustomer.isDefault,
+            createdAt: formatDate(savedCustomer.createdAt)
+        };
+
+        res.status(201).json({
+            message: "Customer created successfully",
+            customer: formattedCustomer
+        });
+
     } catch (error) {
         console.error("Error creating customer:", error);
+        
+        // Manejo específico de errores de validación de Mongoose
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({ message: errors.join(', ') });
+        }
+        
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -245,6 +269,7 @@ export const updateCustomer = async (req, res) => {
             return res.status(400).json({ message: "Invalid customer ID" });
         }
 
+        // Validaciones
         if (phone && !/^\d+$/.test(phone)) {
             return res.status(400).json({ message: "Phone number must contain only digits" });
         }
@@ -262,10 +287,10 @@ export const updateCustomer = async (req, res) => {
         }
 
         const updateData = {};
-        if (name) updateData.name = name;
-        if (lastname) updateData.lastname = lastname;
-        if (email) updateData.email = email;
-        if (phone) updateData.phone = phone;
+        if (name) updateData.name = name.trim();
+        if (lastname) updateData.lastname = lastname.trim();
+        if (email) updateData.email = email.trim().toLowerCase();
+        if (phone) updateData.phone = phone.trim();
         if (isDefault !== undefined) updateData.isDefault = isDefault;
 
         const updatedCustomer = await Customer.findByIdAndUpdate(
@@ -277,6 +302,22 @@ export const updateCustomer = async (req, res) => {
         if (!updatedCustomer) {
             return res.status(404).json({ message: "Customer not found" });
         }
+
+        const formattedCustomer = {
+            id: updatedCustomer._id,
+            name: updatedCustomer.name,
+            lastname: updatedCustomer.lastname,
+            email: updatedCustomer.email,
+            phone: updatedCustomer.phone,
+            status: updatedCustomer.status,
+            createdAt: formatDate(updatedCustomer.createdAt)
+        };
+
+        res.status(200).json({
+            message: "Customer updated successfully",
+            customer: formattedCustomer
+        });
+
     } catch (error) {
         console.error("Error updating customer:", error);
         res.status(500).json({ message: "Server error" });
@@ -328,13 +369,13 @@ export const updateCustomerStatus = async (req, res) => {
             return res.status(400).json({ message: "Invalid customer ID" });
         }
 
+        if (!status || !['active', 'inactive'].includes(status)) {
+            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
+        }
+
         const customer = await Customer.findById(id);
         if (customer && customer.isDefault && status === 'inactive') {
             return res.status(400).json({ message: "Default customer cannot be deactivated" });
-        }
-
-        if (!status || !['active', 'inactive'].includes(status)) {
-            return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
         }
 
         const updatedCustomer = await Customer.findByIdAndUpdate(
@@ -346,6 +387,22 @@ export const updateCustomerStatus = async (req, res) => {
         if (!updatedCustomer) {
             return res.status(404).json({ message: "Customer not found" });
         }
+
+        const formattedCustomer = {
+            id: updatedCustomer._id,
+            name: updatedCustomer.name,
+            lastname: updatedCustomer.lastname,
+            email: updatedCustomer.email,
+            phone: updatedCustomer.phone,
+            status: updatedCustomer.status,
+            createdAt: formatDate(updatedCustomer.createdAt)
+        };
+
+        res.status(200).json({
+            message: `Customer status updated to ${status}`,
+            customer: formattedCustomer
+        });
+
     } catch (error) {
         console.error("Error updating customer status:", error);
         res.status(500).json({ message: "Server error" });

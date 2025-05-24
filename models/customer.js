@@ -16,8 +16,7 @@ const CustomerSchema = new mongoose.Schema({
   },
   email: { type: String, unique: true, required: true, trim: true },
   createdAt: { type: Date, default: Date.now },
-  status: { type: String, enum: ['active', 'inactive'], default: 'active' },
-  isDefault: { type: Boolean, default: false }
+  status: { type: String, enum: ['active', 'inactive'], default: 'active' }
 });
 
 // Ensure only one default customer exists
