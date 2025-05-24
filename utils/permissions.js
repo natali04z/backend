@@ -19,7 +19,7 @@ export const ALL_PERMISSIONS = [
   "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
 
   // Purchases
-  "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases",
+  "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases", "reactivate_purchases",
 
   // Branches
   "view_branches", "create_branches", "update_branches", "delete_branches",
@@ -43,7 +43,7 @@ const DEFAULT_PERMISSIONS = {
     "view_categories", "view_categories_id", "create_categories", "update_status_categories",
     "view_providers", "view_providers_id", "create_providers", "update_providers", "update_status_providers",
     "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
-    "view_purchases", "view_purchases_id", "create_purchases", "update_status_purchases",
+    "view_purchases", "view_purchases_id", "create_purchases", "update_status_purchases", "reactivate_purchases",
     "view_customers", "view_customers_id", "create_customers", "update_customers",
     "view_sales", "view_sales_id", "create_sales"
   ],
@@ -115,9 +115,7 @@ export const checkPermission = async (roleId, permissionCode) => {
 
 // Verifica permiso sincrónicamente si ya tienes el objeto de rol completo
 export const checkPermissionSync = (role, permissionCode) => {
-  // Si role es un objeto (documento de mongoose)
   if (role && typeof role === 'object') {
-    // Si es un rol predefinido, verificar en configuración estática
     if (role.isDefault && role.name && DEFAULT_PERMISSIONS[role.name]) {
       return DEFAULT_PERMISSIONS[role.name].includes(permissionCode);
     }
@@ -125,11 +123,9 @@ export const checkPermissionSync = (role, permissionCode) => {
     // Verificar en el array de permisos del rol
     if (role.permissions && Array.isArray(role.permissions)) {
       return role.permissions.some(permission => {
-        // Si es un ObjectId o string
         if (typeof permission === 'string') {
           return permission === permissionCode;
         }
-        // Si es un documento Permission de Mongoose
         if (permission && typeof permission === 'object') {
           return permission.code === permissionCode;
         }
