@@ -30,7 +30,6 @@ export const getCustomers = async (req, res) => {
             email: customer.email,
             phone: customer.phone,
             status: customer.status,
-            isDefault: customer.isDefault,
             createdAt: formatDate(customer.createdAt)
         }));
 
@@ -68,7 +67,6 @@ export const getCustomerById = async (req, res) => {
             email: customer.email,
             phone: customer.phone,
             status: customer.status,
-            isDefault: customer.isDefault,
             createdAt: formatDate(customer.createdAt)
         };
 
@@ -116,7 +114,6 @@ export const validateCustomerForSale = async (req, res) => {
                     email: customer.email,
                     phone: customer.phone,
                     status: customer.status,
-                    isDefault: customer.isDefault,
                     fullName: `${customer.name} ${customer.lastname}`
                 },
                 statusInfo: {
@@ -177,7 +174,6 @@ export const getDefaultCustomer = async (req, res) => {
             email: defaultCustomer.email,
             phone: defaultCustomer.phone,
             status: defaultCustomer.status,
-            isDefault: defaultCustomer.isDefault,
             createdAt: formatDate(defaultCustomer.createdAt)
         };
 
@@ -223,8 +219,7 @@ export const createCustomer = async (req, res) => {
             lastname: lastname.trim(),
             email: email.trim().toLowerCase(),
             phone: phone.trim(),
-            status: 'active', // Por defecto activo
-            isDefault: isDefault || false,
+            status: 'active',
             createdAt: new Date(),
         });
 
@@ -315,7 +310,6 @@ export const updateCustomer = async (req, res) => {
             email: updatedCustomer.email,
             phone: updatedCustomer.phone,
             status: updatedCustomer.status,
-            isDefault: updatedCustomer.isDefault,
             createdAt: formatDate(updatedCustomer.createdAt)
         };
 
@@ -401,7 +395,6 @@ export const updateCustomerStatus = async (req, res) => {
             email: updatedCustomer.email,
             phone: updatedCustomer.phone,
             status: updatedCustomer.status,
-            isDefault: updatedCustomer.isDefault,
             createdAt: formatDate(updatedCustomer.createdAt)
         };
 
