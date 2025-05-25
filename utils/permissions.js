@@ -19,7 +19,7 @@ export const ALL_PERMISSIONS = [
   "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
 
   // Purchases
-  "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases", "reactivate_purchases",
+  "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases",
 
   // Branches
   "view_branches", "create_branches", "update_branches", "delete_branches",
@@ -28,7 +28,7 @@ export const ALL_PERMISSIONS = [
   "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers", "update_customers_status",
 
   // Sales
-  "view_sales", "view_sales_id", "create_sales", "delete_sales",
+  "view_sales", "view_sales_id", "create_sales", "delete_sales", "update_status_sales",
 
   // Permissions
   "view_permissions", "view_permissions_id", "create_permissions", "update_permissions", "delete_permissions", "update_permission_status"
@@ -43,7 +43,7 @@ const DEFAULT_PERMISSIONS = {
     "view_categories", "view_categories_id", "create_categories", "update_status_categories",
     "view_providers", "view_providers_id", "create_providers", "update_providers", "update_status_providers",
     "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
-    "view_purchases", "view_purchases_id", "create_purchases", "update_status_purchases", "reactivate_purchases",
+    "view_purchases", "view_purchases_id", "create_purchases", "update_status_purchases",
     "view_customers", "view_customers_id", "create_customers", "update_customers",
     "view_sales", "view_sales_id", "create_sales"
   ],

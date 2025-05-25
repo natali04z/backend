@@ -56,29 +56,7 @@ const PurchaseSchema = new mongoose.Schema({
         type: String, 
         enum: ["active", "inactive"], 
         default: "active" 
-    },
-    // Campos para desactivación
-    deactivation_reason: { 
-        type: String 
-    },
-    deactivated_at: { 
-        type: Date 
-    },
-    deactivated_by: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: "User" 
-    },
-    // Campos para reactivación
-    reactivation_reason: { 
-        type: String 
-    },
-    reactivated_at: { 
-        type: Date 
-    },
-    reactivated_by: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: "User" 
     }
-}, { timestamps: true });
+});
 
 export default mongoose.model("Purchase", PurchaseSchema);
