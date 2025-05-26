@@ -11,7 +11,11 @@ const userSchema = new mongoose.Schema({
       type: String, 
       unique: true 
     },
-    password: String,
+    password: {
+      type: String,
+      minlength: [6, 'Password must be at least 6 characters long'],
+      maxlength: [12, 'Password must be at most 12 characters long']
+    },
     role: { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: "Role"
@@ -23,6 +27,6 @@ const userSchema = new mongoose.Schema({
     },
     resetPasswordToken: String,
     resetPasswordExpires: Date
-  });
+});
 
 export default mongoose.model("User", userSchema);
