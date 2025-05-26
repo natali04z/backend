@@ -12,6 +12,13 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
+        // Validación de longitud de contraseña
+        if (password.length < 6 || password.length > 12) {
+            return res.status(400).json({ 
+                message: "Password must be between 6 and 12 characters long" 
+            });
+        }
+
         if (!/^\d+$/.test(contact_number)) {
             return res.status(400).json({ message: "Phone number must contain only digits" });
         }
@@ -200,6 +207,13 @@ export const resetPassword = async (req, res) => {
 
         if (!email || !newPassword) {
             return res.status(400).json({ message: "Email and new password are required" });
+        }
+
+        // Validación de longitud de contraseña
+        if (newPassword.length < 6 || newPassword.length > 12) {
+            return res.status(400).json({ 
+                message: "Password must be between 6 and 12 characters long" 
+            });
         }
 
         // Buscar al usuario nuevamente
