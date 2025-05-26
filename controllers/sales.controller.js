@@ -114,7 +114,7 @@ export const getSaleById = async (req, res) => {
     }
 };
 
-// POST: Create new sale (solo registra la venta, no maneja estado)
+// POST: Create new sale - OPCIÓN 1: Reducir stock inmediatamente
 export const postSale = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_sales")) {
@@ -136,6 +136,7 @@ export const postSale = async (req, res) => {
         let total = 0;
         let validatedProducts = [];
 
+        // Validar productos y verificar stock
         for (let i = 0; i < products.length; i++) {
             const item = products[i];
             
@@ -148,7 +149,13 @@ export const postSale = async (req, res) => {
                 return res.status(400).json({ message: `Cannot sell inactive product at index ${i}` });
             }
 
-            // Usar el precio del producto automáticamente
+            // VALIDACIÓN CRÍTICA: Verificar stock disponible
+            if (foundProduct.stock < item.quantity) {
+                return res.status(400).json({ 
+                    message: `Insufficient stock for product "${foundProduct.name}". Available: ${foundProduct.stock}, Requested: ${item.quantity}` 
+                });
+            }
+
             const sale_price = foundProduct.price;
             const itemTotal = sale_price * item.quantity;
             
@@ -162,6 +169,20 @@ export const postSale = async (req, res) => {
             total += itemTotal;
         }
 
+        // REDUCIR STOCK DIRECTAMENTE - No usar métodos del modelo
+        for (let i = 0; i < validatedProducts.length; i++) {
+            const item = validatedProducts[i];
+            
+            // Actualizar stock directamente en la base de datos
+            const updateResult = await Product.findByIdAndUpdate(
+                item.product,
+                { $inc: { stock: -item.quantity } },
+                { new: true }
+            );
+            
+            console.log(`Stock updated for product ${updateResult.name}: ${updateResult.stock + item.quantity} -> ${updateResult.stock}`);
+        }
+
         const id = await generateSaleId();
 
         const newSale = new Sale({
@@ -169,8 +190,8 @@ export const postSale = async (req, res) => {
             customer,
             products: validatedProducts,
             salesDate: salesDate || new Date(),
-            total
-            // El estado se define en el modelo con default
+            total,
+            status: "completed" // Sale is completed immediately
         });
 
         await newSale.save();
@@ -182,7 +203,7 @@ export const postSale = async (req, res) => {
         }
 
         res.status(201).json({ 
-            message: "Sale registered successfully", 
+            message: "Sale completed successfully and stock has been reduced", 
             sale: formattedSale 
         });
     } catch (error) {
@@ -191,7 +212,7 @@ export const postSale = async (req, res) => {
     }
 };
 
-// PATCH: Update sale status (maneja estado y stock)
+// PATCH: Update sale status - CORREGIDO: Estados finales
 export const updateSaleStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_sales")) {
@@ -218,35 +239,32 @@ export const updateSaleStatus = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
         
-        // Validar transiciones de estado
+        // TRANSICIONES DE ESTADO CORREGIDAS
         const allowedTransitions = {
             "pending": ["processing", "cancelled"],
             "processing": ["completed", "cancelled"],
-            "completed": ["cancelled"],
-            "cancelled": []
+            "completed": [], // NO SE PUEDE CAMBIAR DESDE COMPLETED
+            "cancelled": []  // NO SE PUEDE CAMBIAR DESDE CANCELLED
         };
 
-        if (currentSale.status === "cancelled" && status !== "cancelled") {
-            return res.status(400).json({ 
-                message: "Cannot change status of a cancelled sale" 
-            });
-        }
-
+        // Validar si la transición está permitida
         if (!allowedTransitions[currentSale.status].includes(status)) {
             return res.status(400).json({ 
-                message: `Cannot change status from ${currentSale.status} to ${status}` 
+                message: `Cannot change status from ${currentSale.status} to ${status}. Sale is in a final state.` 
             });
         }
         
-        // Manejar cambios de stock según el estado
+        // Manejar cambios de stock
         if (currentSale.status !== status) {
             if (status === "cancelled") {
-                // Restaurar stock al cancelar
+                // Restaurar stock al cancelar (solo si no estaba cancelada antes)
                 for (const item of currentSale.products) {
-                    const product = await Product.findById(item.product);
-                    if (product && currentSale.status !== "cancelled") {
-                        await product.incrementStock(item.quantity);
-                    }
+                    await Product.findByIdAndUpdate(
+                        item.product,
+                        { $inc: { stock: item.quantity } },
+                        { new: true }
+                    );
+                    console.log(`Stock restored for product: +${item.quantity}`);
                 }
             }
             else if (currentSale.status === "pending" && status === "processing") {
@@ -255,11 +273,15 @@ export const updateSaleStatus = async (req, res) => {
                     const product = await Product.findById(item.product);
                     if (product) {
                         if (product.stock >= item.quantity) {
-                            await product.decrementStock(item.quantity);
+                            await Product.findByIdAndUpdate(
+                                item.product,
+                                { $inc: { stock: -item.quantity } },
+                                { new: true }
+                            );
+                            console.log(`Stock reduced for ${product.name}: -${item.quantity}`);
                         } else {
                             return res.status(400).json({
-                                message: "Cannot process sale because the product no longer has sufficient stock available",
-                                product: product.name
+                                message: `Cannot process sale. Insufficient stock for product "${product.name}". Available: ${product.stock}, Required: ${item.quantity}`
                             });
                         }
                     }
@@ -284,13 +306,14 @@ export const updateSaleStatus = async (req, res) => {
         const statusMessages = {
             "pending": "Sale status updated to pending",
             "processing": "Sale is now being processed and stock has been reduced",
-            "completed": "Sale has been completed successfully",
-            "cancelled": "Sale has been cancelled and stock has been restored"
+            "completed": "Sale has been completed successfully - This is a final state",
+            "cancelled": "Sale has been cancelled and stock has been restored - This is a final state"
         };
 
         res.status(200).json({ 
             message: statusMessages[status],
-            sale: formattedSale 
+            sale: formattedSale,
+            note: ["completed", "cancelled"].includes(status) ? "This sale can no longer be modified" : null
         });
     } catch (error) {
         console.error("Error updating sale status:", error);
@@ -324,9 +347,21 @@ export const deleteSale = async (req, res) => {
             });
         }
 
+        // Si la venta no está cancelada, restaurar stock antes de eliminar
+        if (saleToDelete.status !== "cancelled") {
+            for (const item of saleToDelete.products) {
+                await Product.findByIdAndUpdate(
+                    item.product,
+                    { $inc: { stock: item.quantity } },
+                    { new: true }
+                );
+                console.log(`Stock restored before deletion: +${item.quantity}`);
+            }
+        }
+
         await Sale.findByIdAndDelete(id);
 
-        res.status(200).json({ message: "Sale deleted successfully" });
+        res.status(200).json({ message: "Sale deleted successfully and stock restored" });
     } catch (error) {
         console.error("Error deleting sale:", error);
         res.status(500).json({ message: "Server error", details: error.message });
