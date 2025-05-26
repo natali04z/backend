@@ -17,44 +17,44 @@ function validateBranchData(data, isUpdate = false) {
     const errors = {};
 
     // Validate name
-    if (!isUpdate || data.name) {
-        if (!data.name || data.name.trim() === "") {
+    if (!isUpdate || data.hasOwnProperty('name')) {
+        if (!data.name || typeof data.name !== 'string' || data.name.trim() === "") {
             errors.name = "Branch name is required";
-        } else if (data.name.length < 2 || data.name.length > 100) {
+        } else if (data.name.trim().length < 2 || data.name.trim().length > 100) {
             errors.name = "Name must be between 2 and 100 characters";
         }
     }
 
     // Validate location
-    if (!isUpdate || data.location) {
-        if (!data.location || data.location.trim() === "") {
+    if (!isUpdate || data.hasOwnProperty('location')) {
+        if (!data.location || typeof data.location !== 'string' || data.location.trim() === "") {
             errors.location = "Location is required";
-        } else if (data.location.length < 2 || data.location.length > 100) {
+        } else if (data.location.trim().length < 2 || data.location.trim().length > 100) {
             errors.location = "Location must be between 2 and 100 characters";
         }
     }
 
-    // Validate status
-    if (!isUpdate || data.status) {
+    // Validate status (only if provided)
+    if (data.hasOwnProperty('status')) {
         const validStatuses = ["active", "inactive", "pending"];
         if (!data.status || !validStatuses.includes(data.status)) {
             errors.status = "Invalid status. Must be: active, inactive or pending";
         }
     }
 
-    // Validate phone (basic format validation)
-    if (!isUpdate || data.phone) {
+    // Validate phone
+    if (!isUpdate || data.hasOwnProperty('phone')) {
         const phoneRegex = /^[+]?[\d\s()-]{10,15}$/;
-        if (!data.phone || !phoneRegex.test(data.phone)) {
-            errors.phone = "Invalid phone number";
+        if (!data.phone || typeof data.phone !== 'string' || !phoneRegex.test(data.phone.trim())) {
+            errors.phone = "Invalid phone number format";
         }
     }
 
     // Validate address
-    if (!isUpdate || data.address) {
-        if (!data.address || data.address.trim() === "") {
+    if (!isUpdate || data.hasOwnProperty('address')) {
+        if (!data.address || typeof data.address !== 'string' || data.address.trim() === "") {
             errors.address = "Address is required";
-        } else if (data.address.length < 5 || data.address.length > 200) {
+        } else if (data.address.trim().length < 5 || data.address.trim().length > 200) {
             errors.address = "Address must be between 5 and 200 characters";
         }
     }
@@ -69,10 +69,17 @@ function validateBranchData(data, isUpdate = false) {
 export const getBranches = async (req, res) => {
     try {
         const branches = await Branch.find();
-        res.status(200).json({ branches });
+        res.status(200).json({ 
+            success: true,
+            branches 
+        });
     } catch (error) {
         console.error("Error fetching branches:", error);
-        res.status(500).json({ message: "Error fetching branches" });
+        res.status(500).json({ 
+            success: false,
+            message: "Error fetching branches",
+            error: error.message
+        });
     }
 };
 
@@ -82,34 +89,51 @@ export const getBranchesById = async (req, res) => {
         const branch = await Branch.findOne({ id: req.params.id });
 
         if (!branch) {
-            return res.status(404).json({ message: "Branch not found" });
+            return res.status(404).json({ 
+                success: false,
+                message: "Branch not found" 
+            });
         }
 
-        res.status(200).json(branch);
+        res.status(200).json({
+            success: true,
+            branch
+        });
     } catch (error) {
         console.error("Error fetching branch:", error);
-        res.status(500).json({ message: "Error fetching branch" });
+        res.status(500).json({ 
+            success: false,
+            message: "Error fetching branch",
+            error: error.message
+        });
     }
 };
 
 // Create a new branch
 export const postBranches = async (req, res) => {
     try {
-        const { name, location, phone, address } = req.body;
+        console.log("Request body:", req.body); // Debug log
+        
+        const { name, location, phone, address, status = "active" } = req.body;
         
         // Validate data
         const validation = validateBranchData(req.body);
         if (!validation.isValid) {
+            console.log("Validation errors:", validation.errors); // Debug log
             return res.status(400).json({ 
+                success: false,
                 message: "Validation errors",
                 errors: validation.errors
             });
         }
         
         // Check if a branch with the same name already exists
-        const existingBranch = await Branch.findOne({ name });
+        const existingBranch = await Branch.findOne({ 
+            name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } 
+        });
         if (existingBranch) {
             return res.status(409).json({ 
+                success: false,
                 message: "A branch with this name already exists" 
             });
         }
@@ -117,21 +141,26 @@ export const postBranches = async (req, res) => {
         const id = await generateBranchId();
         const newBranch = new Branch({ 
             id, 
-            name, 
-            location, 
-            phone, 
-            address 
+            name: name.trim(), 
+            location: location.trim(), 
+            phone: phone.trim(), 
+            address: address.trim(),
+            status: status || "active"
         });
         
         await newBranch.save();
         res.status(201).json({ 
+            success: true,
             message: "Branch created successfully", 
-            id: newBranch.id, 
-           ...newBranch._doc 
+            branch: {
+                id: newBranch.id,
+                ...newBranch._doc
+            }
         });
     } catch (error) {
         console.error("Error creating branch:", error);
         res.status(500).json({ 
+            success: false,
             message: "Error creating branch",
             error: error.message
         });
@@ -141,16 +170,24 @@ export const postBranches = async (req, res) => {
 // Update a branch
 export const updateBranches = async (req, res) => {
     try {
-        // Check if the branch exists
-        const existingBranch = await Branch.findById(req.params.id);
+        console.log("Update request - ID:", req.params.id);
+        console.log("Update request - Body:", req.body);
+        
+        // Check if the branch exists using the custom id field
+        const existingBranch = await Branch.findOne({ id: req.params.id });
         if (!existingBranch) {
-            return res.status(404).json({ message: "Branch not found" });
+            return res.status(404).json({ 
+                success: false,
+                message: "Branch not found" 
+            });
         }
 
         // Validate data for update
         const validation = validateBranchData(req.body, true);
         if (!validation.isValid) {
+            console.log("Update validation errors:", validation.errors);
             return res.status(400).json({ 
+                success: false,
                 message: "Validation errors",
                 errors: validation.errors
             });
@@ -159,60 +196,84 @@ export const updateBranches = async (req, res) => {
         // Check if branch name already exists (excluding the current branch)
         if (req.body.name) {
             const duplicateBranch = await Branch.findOne({ 
-                name: req.body.name, 
-                _id: { $ne: req.params.id } 
+                name: { $regex: new RegExp(`^${req.body.name.trim()}$`, 'i') },
+                id: { $ne: req.params.id } 
             });
             if (duplicateBranch) {
                 return res.status(409).json({ 
-                    message: "Correct data" 
+                    success: false,
+                    message: "A branch with this name already exists" 
                 });
             }
         }
 
-        // Update branch
-        const updatedBranch = await Branch.findByIdAndUpdate(
-            req.params.id,
-            req.body,
+        // Prepare update data
+        const updateData = {};
+        if (req.body.name) updateData.name = req.body.name.trim();
+        if (req.body.location) updateData.location = req.body.location.trim();
+        if (req.body.phone) updateData.phone = req.body.phone.trim();
+        if (req.body.address) updateData.address = req.body.address.trim();
+        if (req.body.status) updateData.status = req.body.status;
+
+        // Update branch using the custom id field
+        const updatedBranch = await Branch.findOneAndUpdate(
+            { id: req.params.id },
+            updateData,
             { new: true, runValidators: true }
         );
 
-        res.status(200).json(updatedBranch);
+        res.status(200).json({
+            success: true,
+            message: "Branch updated successfully",
+            branch: updatedBranch
+        });
     } catch (error) {
         console.error("Error updating branch:", error);
-        res.status(500).json({ message: "Error updating branch", error: error.message });
+        res.status(500).json({ 
+            success: false,
+            message: "Error updating branch", 
+            error: error.message 
+        });
     }
 };
 
 // Delete a branch
 export const deleteBranches = async (req, res) => {
     try {
-        const deletedBranch = await Branch.findByIdAndDelete(req.params.id);
+        // Use custom id field instead of MongoDB _id
+        const deletedBranch = await Branch.findOneAndDelete({ id: req.params.id });
 
         if (!deletedBranch) {
-            return res.status(404).json({ message: "Branch not found" });
+            return res.status(404).json({ 
+                success: false,
+                message: "Branch not found" 
+            });
         }
 
-        res.status(200).json({ message: "Branch deleted successfully" });
+        res.status(200).json({ 
+            success: true,
+            message: "Branch deleted successfully" 
+        });
     } catch (error) {
         console.error("Error deleting branch:", error);
-        res.status(500).json({ message: "Error deleting branch", error: error.message });
+        res.status(500).json({ 
+            success: false,
+            message: "Error deleting branch", 
+            error: error.message 
+        });
     }
 };
 
 // Update branch status
 export const updateBranchStatus = async (req, res) => {
     try {
-        // Uncomment this if you have role-based authorization
-        // if (!checkPermission(req.user.role, "update_status_branches")) {
-        //     return res.status(403).json({ message: "Unauthorized access" });
-        // }
-
         const { id } = req.params;
         const { status } = req.body;
 
         // Validate status
         if (!status || !["active", "inactive", "pending"].includes(status)) {
             return res.status(400).json({ 
+                success: false,
                 message: "Status must be 'active', 'inactive' or 'pending'" 
             });
         }
@@ -220,28 +281,11 @@ export const updateBranchStatus = async (req, res) => {
         // Check if branch exists
         const existingBranch = await Branch.findOne({ id });
         if (!existingBranch) {
-            return res.status(404).json({ message: "Branch not found" });
+            return res.status(404).json({ 
+                success: false,
+                message: "Branch not found" 
+            });
         }
-
-        // Additional validation before setting inactive status
-        // Uncomment and adapt if needed
-        /*
-        if (status === 'inactive') {
-            // Check if this branch has active employees or services
-            // Example:
-            // const Employee = mongoose.model('Employee');
-            // const activeEmployeesCount = await Employee.countDocuments({ 
-            //     branch: id, 
-            //     status: 'active' 
-            // });
-            
-            // if (activeEmployeesCount > 0) {
-            //     return res.status(400).json({ 
-            //         message: `Cannot deactivate this branch. It has ${activeEmployeesCount} active employees. Please reassign or deactivate these employees first.`
-            //     });
-            // }
-        }
-        */
 
         // Update branch status
         const updatedBranch = await Branch.findOneAndUpdate(
@@ -251,17 +295,25 @@ export const updateBranchStatus = async (req, res) => {
         ).select("id name status");
 
         if (!updatedBranch) {
-            return res.status(404).json({ message: "Branch not found" });
+            return res.status(404).json({ 
+                success: false,
+                message: "Branch not found" 
+            });
         }
 
         // Return success response
         res.status(200).json({ 
+            success: true,
             message: `Branch ${status === 'active' ? 'activated' : (status === 'inactive' ? 'deactivated' : 'set to pending')} successfully`, 
             branch: updatedBranch 
         });
     } catch (error) {
         console.error("Error updating branch status:", error);
-        res.status(500).json({ message: "Error updating branch status", error: error.message });
+        res.status(500).json({ 
+            success: false,
+            message: "Error updating branch status", 
+            error: error.message 
+        });
     }
 };
 
