@@ -381,7 +381,7 @@ export const updateProduct = async (req, res) => {
     }
 };
 
-// Update product status
+// Update product status (versión mejorada con más debugging)
 export const updateProductStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_products")) {
@@ -399,24 +399,34 @@ export const updateProductStatus = async (req, res) => {
             return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
+        // Primero verificar que el producto existe
+        const existingProduct = await Product.findById(id);
+        if (!existingProduct) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        // Actualizar el producto
         const updatedProduct = await Product.findByIdAndUpdate(
             id,
             { status },
-            { new: true, runValidators: true }
+            { 
+                new: true, 
+                runValidators: true,
+                useFindAndModify: false 
+            }
         )
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
         if (!updatedProduct) {
-            return res.status(404).json({ message: "Product not found" });
+            return res.status(404).json({ message: "Product not found after update" });
         }
 
         const response = { 
             message: `Product ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
-            product: updatedProduct 
+            product: updatedProduct
         };
 
-        // Agregar advertencia si se está desactivando un producto
         if (status === 'inactive') {
             response.warning = "El producto ha sido desactivado y no podrá ser vendido hasta que se reactive";
         }
@@ -424,7 +434,10 @@ export const updateProductStatus = async (req, res) => {
         res.status(200).json(response);
     } catch (error) {
         console.error("Error updating product status:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message
+        });
     }
 };
 

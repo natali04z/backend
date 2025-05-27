@@ -43,9 +43,8 @@ export const validateProductsForSale = async (req, res, next) => {
         // Si hay productos inválidos, retornar error
         if (invalidProducts.length > 0) {
             return res.status(400).json({
-                message: "No se puede procesar la venta debido a productos inválidos",
-                invalidProducts: invalidProducts,
-                details: "Verifica que todos los productos estén activos y tengan stock suficiente"
+                message: "Verifica que todos los productos estén activos y tengan stock suficiente",
+                invalidProducts: invalidProducts
             });
         }
 
