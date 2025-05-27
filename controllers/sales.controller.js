@@ -269,7 +269,7 @@ export const postSale = async (req, res) => {
     }
 };
 
-// PATCH: Actualizar estado de venta
+// PATCH: Actualizar estado de venta (versión modificada)
 export const updateSaleStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_sales")) {
@@ -296,36 +296,30 @@ export const updateSaleStatus = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
         
-        // Definir transiciones permitidas
         const allowedTransitions = {
-            "pending": ["processing", "cancelled"],
-            "processing": ["completed", "cancelled"],
-            "completed": [], // Estado final - no se puede cambiar
-            "cancelled": []  // Estado final - no se puede cambiar
+            "pending": ["processing", "completed", "cancelled"],
+            "processing": ["pending", "completed", "cancelled"], 
+            "completed": ["cancelled", "pending"],
+            "cancelled": ["pending", "processing"]
         };
 
-        // Validar si la transición está permitida
-        if (!allowedTransitions[currentSale.status].includes(status)) {
-            return res.status(400).json({ 
-                message: `Cannot change status from ${currentSale.status} to ${status}. Sale is in a final state.` 
-            });
-        }
-        
         // Manejar cambios de stock según el cambio de estado
         if (currentSale.status !== status) {
-            if (status === "cancelled") {
-                // Restaurar stock al cancelar
-                for (const item of currentSale.products) {
-                    await Product.findByIdAndUpdate(
-                        item.product,
-                        { $inc: { stock: item.quantity } },
-                        { new: true }
-                    );
-                    console.log(`Stock restored for product: +${item.quantity}`);
-                }
-            }
-            else if (currentSale.status === "pending" && status === "processing") {
-                // Reducir stock al comenzar procesamiento
+            // Lógica de stock más inteligente
+            const statusStockImpact = {
+                "pending": 0,      // No afecta stock
+                "processing": -1,  // Reduce stock
+                "completed": -1,   // Stock ya reducido
+                "cancelled": 0     // Stock restaurado
+            };
+
+            const currentImpact = statusStockImpact[currentSale.status];
+            const newImpact = statusStockImpact[status];
+            
+            // Calcular diferencia de stock necesaria
+            const stockDifference = newImpact - currentImpact;
+            
+            if (stockDifference !== 0) {
                 for (const item of currentSale.products) {
                     const product = await Product.findById(item.product);
                     if (!product) {
@@ -334,18 +328,22 @@ export const updateSaleStatus = async (req, res) => {
                         });
                     }
 
-                    if (product.stock < item.quantity) {
+                    const stockChange = item.quantity * stockDifference;
+                    
+                    // Verificar stock disponible si vamos a reducir
+                    if (stockChange < 0 && product.stock < Math.abs(stockChange)) {
                         return res.status(400).json({
-                            message: `Cannot process sale. Insufficient stock for product "${product.name}". Available: ${product.stock}, Required: ${item.quantity}`
+                            message: `Cannot process sale. Insufficient stock for product "${product.name}". Available: ${product.stock}, Required: ${Math.abs(stockChange)}`
                         });
                     }
 
                     await Product.findByIdAndUpdate(
                         item.product,
-                        { $inc: { stock: -item.quantity } },
+                        { $inc: { stock: stockChange } },
                         { new: true }
                     );
-                    console.log(`Stock reduced for ${product.name}: -${item.quantity}`);
+                    
+                    console.log(`Stock updated for ${product.name}: ${stockChange > 0 ? '+' : ''}${stockChange}`);
                 }
             }
         }
@@ -368,15 +366,14 @@ export const updateSaleStatus = async (req, res) => {
 
         const statusMessages = {
             "pending": "Sale status updated to pending",
-            "processing": "Sale is now being processed and stock has been reduced",
-            "completed": "Sale has been completed successfully - This is a final state",
-            "cancelled": "Sale has been cancelled and stock has been restored - This is a final state"
+            "processing": "Sale is now being processed",
+            "completed": "Sale has been completed successfully",
+            "cancelled": "Sale has been cancelled"
         };
 
         res.status(200).json({ 
             message: statusMessages[status],
-            sale: formattedSale,
-            note: ["completed", "cancelled"].includes(status) ? "This sale can no longer be modified" : null
+            sale: formattedSale
         });
 
     } catch (error) {
