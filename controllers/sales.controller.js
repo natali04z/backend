@@ -199,6 +199,7 @@ export const postSale = async (req, res) => {
 
         const { validatedProducts, total } = await validateProductsAvailability(products);
 
+        // Reservar stock al crear la venta (processing)
         for (const item of validatedProducts) {
             await Product.findByIdAndUpdate(
                 item.product,
@@ -220,7 +221,7 @@ export const postSale = async (req, res) => {
             })),
             salesDate: salesDate ? new Date(salesDate) : new Date(),
             total,
-            status: "completed"
+            status: "processing" // Estado predeterminado cambiado a "processing"
         });
 
         await newSale.save();
@@ -236,7 +237,7 @@ export const postSale = async (req, res) => {
         }
 
         res.status(201).json({ 
-            message: "Sale completed successfully and stock has been reduced", 
+            message: "Sale created successfully and stock has been reserved for processing.", 
             sale: formattedSale 
         });
 
@@ -268,10 +269,11 @@ export const updateSaleStatus = async (req, res) => {
             return res.status(400).json({ message: "Invalid sale ID format" });
         }
 
-        const validStatuses = ["pending", "processing", "completed", "cancelled"];
+        // Estados válidos actualizados (sin "pending")
+        const validStatuses = ["processing", "completed", "cancelled"];
         if (!status || !validStatuses.includes(status)) {
             return res.status(400).json({ 
-                message: "Status must be one of: pending, processing, completed, or cancelled" 
+                message: "Status must be one of: processing, completed, or cancelled" 
             });
         }
 
@@ -281,6 +283,7 @@ export const updateSaleStatus = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
 
+        // No permitir cambios si la venta está completada o cancelada
         if (currentSale.status === "completed") {
             return res.status(400).json({ 
                 message: "Cannot change status of a completed sale." 
@@ -299,11 +302,11 @@ export const updateSaleStatus = async (req, res) => {
             });
         }
         
+        // Transiciones permitidas actualizadas
         const allowedTransitions = {
-            "pending": ["processing", "completed", "cancelled"],
             "processing": ["completed", "cancelled"],
-            "completed": [],
-            "cancelled": []
+            "completed": [], // No se puede cambiar desde completed
+            "cancelled": []  // No se puede cambiar desde cancelled
         };
 
         if (!allowedTransitions[currentSale.status].includes(status)) {
@@ -312,20 +315,14 @@ export const updateSaleStatus = async (req, res) => {
             });
         }
 
-        if (currentSale.status !== status) {
-            const statusStockImpact = {
-                "pending": 0,
-                "processing": 0,
-                "completed": 0,
-                "cancelled": 1
-            };
-
-            const currentImpact = statusStockImpact[currentSale.status];
-            const newImpact = statusStockImpact[status];
-            
-            const stockDifference = newImpact - currentImpact;
-            
-            if (stockDifference !== 0) {
+        // Manejar stock según el cambio de estado
+        if (currentSale.status === "processing") {
+            if (status === "completed") {
+                // De processing a completed: El stock ya está reservado, 
+                // no necesita cambios adicionales (queda consumido definitivamente)
+                // No hay cambios en el stock
+            } else if (status === "cancelled") {
+                // De processing a cancelled: Restaurar stock reservado
                 for (const item of currentSale.products) {
                     const product = await Product.findById(item.product);
                     if (!product) {
@@ -334,11 +331,10 @@ export const updateSaleStatus = async (req, res) => {
                         });
                     }
 
-                    const stockChange = item.quantity * stockDifference;
-                    
+                    // Restaurar stock al cancelar
                     await Product.findByIdAndUpdate(
                         item.product,
-                        { $inc: { stock: stockChange } },
+                        { $inc: { stock: item.quantity } },
                         { new: true }
                     );
                 }
@@ -363,11 +359,11 @@ export const updateSaleStatus = async (req, res) => {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
         }
 
+        // Mensajes actualizados con la lógica de reserva/consumo
         const statusMessages = {
-            "pending": "Sale status updated to pending",
-            "processing": "Sale is now being processed", 
-            "completed": "Sale has been completed successfully",
-            "cancelled": "Sale has been cancelled"
+            "processing": "Sale is being processed with stock reserved", 
+            "completed": "Sale completed successfully - stock consumed permanently",
+            "cancelled": "Sale cancelled - reserved stock has been restored"
         };
 
         res.status(200).json({ 
@@ -401,13 +397,15 @@ export const deleteSale = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
         
-        if (!["pending", "cancelled"].includes(saleToDelete.status)) {
+        // Actualizar condiciones para permitir eliminar solo ventas en processing o cancelled
+        if (!["processing", "cancelled"].includes(saleToDelete.status)) {
             return res.status(400).json({ 
-                message: "Cannot delete sale that is already being processed or completed. Only pending or cancelled sales can be deleted." 
+                message: "Cannot delete sale that is completed. Only processing or cancelled sales can be deleted." 
             });
         }
 
-        if (saleToDelete.status === "pending") {
+        // Restaurar stock reservado si la venta estaba en processing
+        if (saleToDelete.status === "processing") {
             for (const item of saleToDelete.products) {
                 await Product.findByIdAndUpdate(
                     item.product,
@@ -421,7 +419,7 @@ export const deleteSale = async (req, res) => {
 
         res.status(200).json({ 
             message: "Sale deleted successfully" + 
-                    (saleToDelete.status === "pending" ? " and stock restored" : "")
+                    (saleToDelete.status === "processing" ? " and reserved stock restored" : "")
         });
 
     } catch (error) {
