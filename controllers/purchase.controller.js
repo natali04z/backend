@@ -5,14 +5,64 @@ import Provider from "../models/provider.js";
 import { checkPermission } from "../utils/permissions.js";
 
 async function generatePurchaseId() {
-    const lastPurchase = await Purchase.findOne().sort({ createdAt: -1 });
-    if (!lastPurchase || !/^Pu\d{2}$/.test(lastPurchase.id)) {
-        return "Pu01";
-    }
+    try {
+        // Buscar la última compra por ID, no por fecha
+        const lastPurchase = await Purchase.findOne()
+            .sort({ id: -1 })
+            .select('id');
+            
+        if (!lastPurchase || !lastPurchase.id || !/^Pu\d{2}$/.test(lastPurchase.id)) {
+            // Verificar que Pu01 no exista
+            const existingPu01 = await Purchase.findOne({ id: "Pu01" });
+            if (existingPu01) {
+                return await findNextAvailableId();
+            }
+            return "Pu01";
+        }
 
-    const lastNumber = parseInt(lastPurchase.id.substring(2), 10);
-    const nextNumber = (lastNumber + 1).toString().padStart(2, "0");
-    return `Pu${nextNumber}`;
+        const lastNumber = parseInt(lastPurchase.id.substring(2), 10);
+        let nextNumber = lastNumber + 1;
+        let attempts = 0;
+        const maxAttempts = 100;
+        
+        while (attempts < maxAttempts) {
+            const candidateId = `Pu${String(nextNumber).padStart(2, "0")}`;
+            
+            // Verificar si ya existe
+            const existing = await Purchase.findOne({ id: candidateId });
+            
+            if (!existing) {
+                return candidateId;
+            }
+            
+            nextNumber++;
+            attempts++;
+        }
+        
+        // Fallback con timestamp si hay demasiados registros
+        const timestamp = Date.now().toString().slice(-4);
+        return `Pu${timestamp}`;
+        
+    } catch (error) {
+        // ID de emergencia con timestamp
+        const emergencyId = `Pu${Date.now().toString().slice(-4)}`;
+        return emergencyId;
+    }
+}
+
+async function findNextAvailableId() {
+    for (let i = 1; i <= 99; i++) {
+        const candidateId = `Pu${String(i).padStart(2, "0")}`;
+        const existing = await Purchase.findOne({ id: candidateId });
+        
+        if (!existing) {
+            return candidateId;
+        }
+    }
+    
+    // Si todos los números del 01 al 99 están ocupados
+    const timestamp = Date.now().toString().slice(-4);
+    return `Pu${timestamp}`;
 }
 
 function validatePurchaseData(data) {
@@ -58,11 +108,9 @@ export const getPurchases = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        console.log("Executing purchase query");
         const purchases = await Purchase.find()
             .populate("provider", "company")
             .populate("products.product", "name price");
-        console.log(`Found ${purchases.length} purchases`);
 
         const formattedPurchases = purchases.map(purchase => {
             const purchaseObj = purchase.toObject();
@@ -85,7 +133,6 @@ export const getPurchases = async (req, res) => {
 
         res.status(200).json(formattedPurchases);
     } catch (error) {
-        console.error("Error fetching purchases:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
@@ -128,7 +175,6 @@ export const getPurchaseById = async (req, res) => {
 
         res.status(200).json(formattedPurchase);
     } catch (error) {
-        console.error("Error fetching purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
@@ -181,14 +227,13 @@ export const postPurchase = async (req, res) => {
             });
             
             total += itemTotal;
-
             await foundProduct.incrementStock(item.quantity);
         }
 
-        const id = await generatePurchaseId();
+        const purchaseId = await generatePurchaseId();
 
         const newPurchase = new Purchase({
-            id,
+            id: purchaseId,
             provider,
             products: validatedProducts,
             purchase_date: purchase_date || new Date(),
@@ -207,9 +252,19 @@ export const postPurchase = async (req, res) => {
             message: "Purchase created successfully and product stock updated", 
             purchase: formattedPurchase 
         });
+        
     } catch (error) {
-        console.error("Error creating purchase:", error);
-        res.status(500).json({ message: "Server error", details: error.message });
+        // Manejo específico para errores de duplicado
+        if (error.code === 11000 && error.keyPattern?.id) {
+            return res.status(409).json({ 
+                message: "Purchase ID conflict, please try again"
+            });
+        }
+        
+        res.status(500).json({ 
+            message: "Server error", 
+            details: error.message 
+        });
     }
 };
 
@@ -289,7 +344,6 @@ export const deactivatePurchase = async (req, res) => {
             purchase: formattedPurchase 
         });
     } catch (error) {
-        console.error("Error deactivating purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
@@ -323,7 +377,6 @@ export const deletePurchase = async (req, res) => {
 
         res.status(200).json({ message: "Purchase deleted successfully" });
     } catch (error) {
-        console.error("Error deleting purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
