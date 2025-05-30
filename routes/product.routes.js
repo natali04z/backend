@@ -5,13 +5,15 @@ import {
     postProduct,
     updateProduct,
     deleteProduct,
-    updateProductStatus
+    updateProductStatus,
+    getExpirationNotifications
 } from "../controllers/product.controller.js";
 
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
+router.get("/expiration-notifications", authenticateUser, authorizePermission("view_products"), getExpirationNotifications);
 router.get("/", authenticateUser, authorizePermission("view_products"), getProducts);
 router.get("/:id", authenticateUser, authorizePermission("view_products_id"), getProductById);
 router.post("/", authenticateUser, authorizePermission("create_products"), postProduct);

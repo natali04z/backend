@@ -62,7 +62,6 @@ async function validateProductsAvailability(products) {
     for (let i = 0; i < products.length; i++) {
         const item = products[i];
         
-        // Validar que el product ID sea un ObjectId válido
         if (!mongoose.Types.ObjectId.isValid(item.product)) {
             throw new Error(`Invalid product ID format at index ${i}`);
         }
@@ -72,17 +71,14 @@ async function validateProductsAvailability(products) {
             throw new Error(`Product not found at index ${i}`);
         }
 
-        // Verificar que el producto esté activo
         if (foundProduct.status !== "active") {
             throw new Error(`Cannot sell inactive product "${foundProduct.name}" at index ${i}`);
         }
 
-        // Verificar stock disponible
         if (foundProduct.stock < item.quantity) {
             throw new Error(`Insufficient stock for product "${foundProduct.name}". Available: ${foundProduct.stock}, Requested: ${item.quantity}`);
         }
 
-        // Verificar fecha de vencimiento
         const currentDate = new Date();
         if (foundProduct.expirationDate && foundProduct.expirationDate <= currentDate) {
             throw new Error(`Product "${foundProduct.name}" has expired and cannot be sold`);
@@ -96,7 +92,7 @@ async function validateProductsAvailability(products) {
             quantity: item.quantity,
             sale_price: salePrice,
             total: itemTotal,
-            productName: foundProduct.name // Para logs
+            productName: foundProduct.name
         });
         
         total += itemTotal;
@@ -105,25 +101,26 @@ async function validateProductsAvailability(products) {
     return { validatedProducts, total };
 }
 
-// GET: Obtener todas las ventas
+// Función auxiliar para verificar si una venta se puede modificar
+export const canModifySale = (saleStatus) => {
+    return !["completed", "cancelled"].includes(saleStatus);
+};
+
+// Obtener todas las ventas
 export const getSales = async (req, res) => {
     try {        
         if (!req.user || !checkPermission(req.user.role, "view_sales")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        console.log("Executing sales query");
         const sales = await Sale.find()
             .populate("customer", "name lastname email phone")
             .populate("products.product", "id name price")
-            .sort({ createdAt: -1 }); // Más recientes primero
-
-        console.log(`Found ${sales.length} sales`);
+            .sort({ createdAt: -1 });
 
         const formattedSales = sales.map(sale => {
             const saleObj = sale.toObject();
             
-            // Formatear fecha para mostrar
             if (saleObj.salesDate) {
                 saleObj.salesDate = new Date(saleObj.salesDate).toISOString().split('T')[0];
             }
@@ -138,7 +135,7 @@ export const getSales = async (req, res) => {
     }
 };
 
-// GET: Obtener una venta por ID
+// Obtener una venta por ID
 export const getSaleById = async (req, res) => {
     try {
         if (!req.user || !checkPermission(req.user.role, "view_sales_id")) {
@@ -161,7 +158,6 @@ export const getSaleById = async (req, res) => {
 
         const formattedSale = sale.toObject();
         
-        // Formatear fecha para mostrar
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
         }
@@ -173,7 +169,7 @@ export const getSaleById = async (req, res) => {
     }
 };
 
-// POST: Crear nueva venta
+// Crear nueva venta
 export const postSale = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_sales")) {
@@ -182,7 +178,6 @@ export const postSale = async (req, res) => {
 
         const { products, customer, salesDate } = req.body;
 
-        // Validar datos de entrada
         const validationErrors = validateSaleData(req.body);
         if (validationErrors.length > 0) {
             return res.status(400).json({ 
@@ -191,7 +186,6 @@ export const postSale = async (req, res) => {
             });
         }
 
-        // Verificar que el cliente existe y está activo
         const existingCustomer = await Customer.findById(customer);
         if (!existingCustomer) {
             return res.status(404).json({ message: "Customer not found" });
@@ -203,24 +197,18 @@ export const postSale = async (req, res) => {
             });
         }
 
-        // Validar productos y verificar disponibilidad
         const { validatedProducts, total } = await validateProductsAvailability(products);
 
-        // Reducir stock de productos
         for (const item of validatedProducts) {
-            const updateResult = await Product.findByIdAndUpdate(
+            await Product.findByIdAndUpdate(
                 item.product,
                 { $inc: { stock: -item.quantity } },
                 { new: true, runValidators: true }
             );
-            
-            console.log(`Stock updated for product ${item.productName}: ${updateResult.stock + item.quantity} -> ${updateResult.stock}`);
         }
 
-        // Generar ID personalizado para la venta
         const saleId = await generateSaleId();
 
-        // Crear nueva venta
         const newSale = new Sale({
             id: saleId,
             customer,
@@ -232,19 +220,17 @@ export const postSale = async (req, res) => {
             })),
             salesDate: salesDate ? new Date(salesDate) : new Date(),
             total,
-            status: "completed" // Venta completada inmediatamente
+            status: "completed"
         });
 
         await newSale.save();
 
-        // Obtener la venta creada con populate
         const createdSale = await Sale.findById(newSale._id)
             .populate("customer", "name lastname email phone")
             .populate("products.product", "id name price");
 
         const formattedSale = createdSale.toObject();
         
-        // Formatear fecha para respuesta
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
         }
@@ -257,7 +243,6 @@ export const postSale = async (req, res) => {
     } catch (error) {
         console.error("Error creating sale:", error);
         
-        // Manejar errores específicos de validación
         if (error.message.includes("Invalid product") || 
             error.message.includes("not found") || 
             error.message.includes("Insufficient stock") ||
@@ -269,7 +254,7 @@ export const postSale = async (req, res) => {
     }
 };
 
-// PATCH: Actualizar estado de venta (versión modificada)
+// Actualizar estado de venta
 export const updateSaleStatus = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_sales")) {
@@ -295,28 +280,49 @@ export const updateSaleStatus = async (req, res) => {
         if (!currentSale) {
             return res.status(404).json({ message: "Sale not found" });
         }
+
+        if (currentSale.status === "completed") {
+            return res.status(400).json({ 
+                message: "Cannot change status of a completed sale." 
+            });
+        }
+
+        if (currentSale.status === "cancelled") {
+            return res.status(400).json({ 
+                message: "Cannot change status of a cancelled sale." 
+            });
+        }
+
+        if (currentSale.status === status) {
+            return res.status(400).json({ 
+                message: `Sale is already in ${status} status` 
+            });
+        }
         
         const allowedTransitions = {
             "pending": ["processing", "completed", "cancelled"],
-            "processing": ["pending", "completed", "cancelled"], 
-            "completed": ["cancelled", "pending"],
-            "cancelled": ["pending", "processing"]
+            "processing": ["completed", "cancelled"],
+            "completed": [],
+            "cancelled": []
         };
 
-        // Manejar cambios de stock según el cambio de estado
+        if (!allowedTransitions[currentSale.status].includes(status)) {
+            return res.status(400).json({
+                message: `Cannot change status from ${currentSale.status} to ${status}. Allowed transitions from ${currentSale.status}: ${allowedTransitions[currentSale.status].join(', ') || 'none'}`
+            });
+        }
+
         if (currentSale.status !== status) {
-            // Lógica de stock más inteligente
             const statusStockImpact = {
-                "pending": 0,      // No afecta stock
-                "processing": -1,  // Reduce stock
-                "completed": -1,   // Stock ya reducido
-                "cancelled": 0     // Stock restaurado
+                "pending": 0,
+                "processing": 0,
+                "completed": 0,
+                "cancelled": 1
             };
 
             const currentImpact = statusStockImpact[currentSale.status];
             const newImpact = statusStockImpact[status];
             
-            // Calcular diferencia de stock necesaria
             const stockDifference = newImpact - currentImpact;
             
             if (stockDifference !== 0) {
@@ -330,28 +336,22 @@ export const updateSaleStatus = async (req, res) => {
 
                     const stockChange = item.quantity * stockDifference;
                     
-                    // Verificar stock disponible si vamos a reducir
-                    if (stockChange < 0 && product.stock < Math.abs(stockChange)) {
-                        return res.status(400).json({
-                            message: `Cannot process sale. Insufficient stock for product "${product.name}". Available: ${product.stock}, Required: ${Math.abs(stockChange)}`
-                        });
-                    }
-
                     await Product.findByIdAndUpdate(
                         item.product,
                         { $inc: { stock: stockChange } },
                         { new: true }
                     );
-                    
-                    console.log(`Stock updated for ${product.name}: ${stockChange > 0 ? '+' : ''}${stockChange}`);
                 }
             }
         }
 
-        // Actualizar el estado de la venta
         const updatedSale = await Sale.findByIdAndUpdate(
             id,
-            { status },
+            { 
+                status,
+                ...(status === "completed" && { completedAt: new Date() }),
+                ...(status === "cancelled" && { cancelledAt: new Date() })
+            },
             { new: true, runValidators: true }
         )
             .populate("customer", "name lastname email phone")
@@ -359,21 +359,21 @@ export const updateSaleStatus = async (req, res) => {
 
         const formattedSale = updatedSale.toObject();
         
-        // Formatear fecha para respuesta
         if (formattedSale.salesDate) {
             formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
         }
 
         const statusMessages = {
             "pending": "Sale status updated to pending",
-            "processing": "Sale is now being processed",
+            "processing": "Sale is now being processed", 
             "completed": "Sale has been completed successfully",
             "cancelled": "Sale has been cancelled"
         };
 
         res.status(200).json({ 
             message: statusMessages[status],
-            sale: formattedSale
+            sale: formattedSale,
+            isFinalStatus: ["completed", "cancelled"].includes(status)
         });
 
     } catch (error) {
@@ -382,7 +382,7 @@ export const updateSaleStatus = async (req, res) => {
     }
 };
 
-// DELETE: Eliminar una venta
+// Eliminar una venta
 export const deleteSale = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_sales")) {
@@ -401,14 +401,12 @@ export const deleteSale = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
         
-        // Solo permitir eliminar si está en estado pending o cancelled
         if (!["pending", "cancelled"].includes(saleToDelete.status)) {
             return res.status(400).json({ 
                 message: "Cannot delete sale that is already being processed or completed. Only pending or cancelled sales can be deleted." 
             });
         }
 
-        // Si la venta está en pending (no cancelled), restaurar stock antes de eliminar
         if (saleToDelete.status === "pending") {
             for (const item of saleToDelete.products) {
                 await Product.findByIdAndUpdate(
@@ -416,7 +414,6 @@ export const deleteSale = async (req, res) => {
                     { $inc: { stock: item.quantity } },
                     { new: true }
                 );
-                console.log(`Stock restored before deletion: +${item.quantity}`);
             }
         }
 

@@ -18,7 +18,6 @@ async function generatePurchaseId() {
 function validatePurchaseData(data) {
     const errors = [];
     
-    // Validaciones obligatorias para creación
     if (!data.products || !Array.isArray(data.products) || data.products.length === 0) {
         errors.push("At least one product is required");
     }
@@ -52,7 +51,7 @@ function validatePurchaseData(data) {
     return errors;
 }
 
-// GET: Retrieve all purchases
+// Retrieve all purchases
 export const getPurchases = async (req, res) => {
     try {        
         if (!req.user || !checkPermission(req.user.role, "view_purchases")) {
@@ -91,7 +90,7 @@ export const getPurchases = async (req, res) => {
     }
 };
 
-// GET: Retrieve a single purchase by ID
+// Retrieve a single purchase by ID
 export const getPurchaseById = async (req, res) => {
     try {
         if (!req.user || !checkPermission(req.user.role, "view_purchases_id")) {
@@ -134,7 +133,7 @@ export const getPurchaseById = async (req, res) => {
     }
 };
 
-// POST: Create new purchase
+// Create new purchase
 export const postPurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_purchases")) {
@@ -151,6 +150,10 @@ export const postPurchase = async (req, res) => {
         const existingProvider = await Provider.findById(provider);
         if (!existingProvider) {
             return res.status(404).json({ message: "Provider not found" });
+        }
+
+        if (existingProvider.status !== "active") {
+            return res.status(400).json({ message: "Cannot use inactive provider" });
         }
 
         let total = 0;
@@ -210,7 +213,7 @@ export const postPurchase = async (req, res) => {
     }
 };
 
-// UPDATE: Deactivate purchase (with reason)
+// Deactivate purchase (with reason)
 export const deactivatePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_purchases")) {
@@ -224,7 +227,6 @@ export const deactivatePurchase = async (req, res) => {
             return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Validar que se proporcione un motivo
         if (!reason || reason.trim().length === 0) {
             return res.status(400).json({ 
                 message: "Deactivation reason is required" 
@@ -243,7 +245,6 @@ export const deactivatePurchase = async (req, res) => {
             });
         }
 
-        // Verificar que hay suficiente stock para revertir
         for (const item of purchase.products) {
             const product = await Product.findById(item.product);
             if (product) {
@@ -257,7 +258,6 @@ export const deactivatePurchase = async (req, res) => {
             }
         }
 
-        // Revertir el stock
         for (const item of purchase.products) {
             const product = await Product.findById(item.product);
             if (product) {
@@ -294,7 +294,7 @@ export const deactivatePurchase = async (req, res) => {
     }
 };
 
-// DELETE: Remove a purchase by ID (solo si está inactiva)
+// Remove a purchase by ID (solo si está inactiva)
 export const deletePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_purchases")) {
