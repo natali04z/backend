@@ -29,8 +29,8 @@ function validateNIT(nit) {
     }
     
     // Verificar longitud mínima (ajusta según tus necesidades)
-    if (nit.replace(/-/g, '').length < 6) {
-        return { isValid: false, message: "NIT must have at least 6 digits" };
+    if (nit.replace(/-/g, '').length < 9) {
+        return { isValid: false, message: "NIT must have at least 9 digits" };
     }
     
     return { isValid: true };
