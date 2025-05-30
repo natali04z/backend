@@ -69,9 +69,8 @@ export const postProvider = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        // CAMBIO AQUÍ: Solo validar que sean dígitos, sin formato específico
-        if (!/^\d+$/.test(nit)) {
-            return res.status(400).json({ message: "NIT must contain only digits" });
+        if (!/^\d{9}(-\d)?$/.test(nit)) {
+            return res.status(400).json({ message: "NIT must be 9 digits, optionally followed by hyphen and verification digit (e.g., 890904478-6)" });
         }
 
         if (!/^\d+$/.test(contact_phone)) {
@@ -132,9 +131,8 @@ export const putProvider = async (req, res) => {
             return res.status(400).json({ message: "Name cannot be empty" });
         }
 
-        // CAMBIO AQUÍ: Solo validar que sean dígitos, sin formato específico
-        if (nit && !/^\d+$/.test(nit)) {
-            return res.status(400).json({ message: "NIT must contain only digits" });
+        if (nit && !/^\d{9}(-\d)?$/.test(nit)) {
+            return res.status(400).json({ message: "NIT must be digits" });
         }
 
         if (contact_phone && !/^\d+$/.test(contact_phone)) {
