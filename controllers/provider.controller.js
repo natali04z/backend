@@ -56,6 +56,8 @@ export const getOneProvider = async (req, res) => {
     }
 };
 
+// En el controlador de proveedores - Actualizar validaciones del NIT
+
 // Crear un nuevo proveedor
 export const postProvider = async (req, res) => {
     try {
@@ -69,8 +71,9 @@ export const postProvider = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        if (!/^\d{9}(-\d)?$/.test(nit)) {
-            return res.status(400).json({ message: "NIT must be 9 digits, optionally followed by hyphen and verification digit (e.g., 890904478-6)" });
+        // ACTUALIZADO: Permitir números y guiones en el NIT
+        if (!/^[\d-]+$/.test(nit)) {
+            return res.status(400).json({ message: "NIT must contain only digits and hyphens" });
         }
 
         if (!/^\d+$/.test(contact_phone)) {
@@ -131,8 +134,9 @@ export const putProvider = async (req, res) => {
             return res.status(400).json({ message: "Name cannot be empty" });
         }
 
-        if (nit && !/^\d{9}(-\d)?$/.test(nit)) {
-            return res.status(400).json({ message: "NIT must be digits" });
+        // ACTUALIZADO: Permitir números y guiones en el NIT
+        if (nit && !/^[\d-]+$/.test(nit)) {
+            return res.status(400).json({ message: "NIT must contain only digits and hyphens" });
         }
 
         if (contact_phone && !/^\d+$/.test(contact_phone)) {
