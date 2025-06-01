@@ -2,18 +2,38 @@ import Customer from "../models/customer.js";
 import mongoose from "mongoose";
 import { checkPermission } from "../utils/permissions.js";
 
-// Función para formatear fecha a DD/MM/YYYY
-const formatDate = (date) => {
-  if (!date) return null;
-  
-  // Crear fecha local para evitar problemas de zona horaria
-  const d = new Date(date);
-  const day = d.getDate().toString().padStart(2, '0');
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  const year = d.getFullYear();
-  
-  return `${day}/${month}/${year}`;
-};
+// ===== FUNCIONES HELPER PARA FECHAS =====
+
+/**
+ * Convierte una fecha a formato YYYY-MM-DD respetando la zona horaria local
+ * @param {Date|string} date - Fecha a convertir
+ * @returns {string} Fecha en formato YYYY-MM-DD
+ */
+function formatLocalDate(date = new Date()) {
+    const dateObj = date instanceof Date ? date : new Date(date);
+    
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Convierte fecha de string YYYY-MM-DD a objeto Date (zona local)
+ * @param {string} dateString
+ * @returns {Date}
+ */
+function parseLocalDate(dateString) {
+    if (!dateString) return new Date();
+    
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day);
+    }
+    
+    return new Date(dateString);
+}
 
 // Obtener todos los clientes
 export const getCustomers = async (req, res) => {
@@ -35,13 +55,13 @@ export const getCustomers = async (req, res) => {
             phone: customer.phone,
             status: customer.status,
             isDefault: customer.isDefault || false,
-            createdAt: formatDate(customer.createdAt)
+            createdAt: customer.createdAt ? formatLocalDate(customer.createdAt) : null
         }));
 
         res.status(200).json(formattedCustomers);
     } catch (error) {
         console.error("Error fetching customers:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -55,7 +75,7 @@ export const getCustomerById = async (req, res) => {
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Invalid customer ID" });
+            return res.status(400).json({ message: "Invalid customer ID format" });
         }
 
         const customer = await Customer.findById(id);
@@ -72,11 +92,11 @@ export const getCustomerById = async (req, res) => {
             phone: customer.phone,
             status: customer.status,
             isDefault: customer.isDefault || false,
-            createdAt: formatDate(customer.createdAt)
+            createdAt: customer.createdAt ? formatLocalDate(customer.createdAt) : null
         });
     } catch (error) {
         console.error("Error fetching customer:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -128,7 +148,7 @@ export const createCustomer = async (req, res) => {
                 phone: savedCustomer.phone,
                 status: savedCustomer.status,
                 isDefault: savedCustomer.isDefault,
-                createdAt: formatDate(savedCustomer.createdAt)
+                createdAt: savedCustomer.createdAt ? formatLocalDate(savedCustomer.createdAt) : null
             }
         });
 
@@ -137,14 +157,14 @@ export const createCustomer = async (req, res) => {
         
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
-            return res.status(400).json({ message: errors.join(', ') });
+            return res.status(400).json({ message: "Validation error", errors });
         }
         
         if (error.code === 11000) {
             return res.status(400).json({ message: "Customer with this email already exists" });
         }
         
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -159,7 +179,7 @@ export const updateCustomer = async (req, res) => {
         const { name, lastname, email, phone } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Invalid customer ID" });
+            return res.status(400).json({ message: "Invalid customer ID format" });
         }
 
         const existingCustomer = await Customer.findById(id);
@@ -215,7 +235,7 @@ export const updateCustomer = async (req, res) => {
                 phone: updatedCustomer.phone,
                 status: updatedCustomer.status,
                 isDefault: updatedCustomer.isDefault,
-                createdAt: formatDate(updatedCustomer.createdAt)
+                createdAt: updatedCustomer.createdAt ? formatLocalDate(updatedCustomer.createdAt) : null
             }
         });
 
@@ -226,7 +246,7 @@ export const updateCustomer = async (req, res) => {
             return res.status(400).json({ message: "Email already in use by another customer" });
         }
         
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -240,7 +260,7 @@ export const deleteCustomer = async (req, res) => {
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Invalid customer ID" });
+            return res.status(400).json({ message: "Invalid customer ID format" });
         }
 
         const customer = await Customer.findById(id);
@@ -258,7 +278,7 @@ export const deleteCustomer = async (req, res) => {
         res.status(200).json({ message: "Customer deleted successfully" });
     } catch (error) {
         console.error("Error deleting customer:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -273,7 +293,7 @@ export const updateCustomerStatus = async (req, res) => {
         const { status } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Invalid customer ID" });
+            return res.status(400).json({ message: "Invalid customer ID format" });
         }
 
         if (!status || !['active', 'inactive'].includes(status)) {
@@ -306,13 +326,13 @@ export const updateCustomerStatus = async (req, res) => {
                 phone: updatedCustomer.phone,
                 status: updatedCustomer.status,
                 isDefault: updatedCustomer.isDefault,
-                createdAt: formatDate(updatedCustomer.createdAt)
+                createdAt: updatedCustomer.createdAt ? formatLocalDate(updatedCustomer.createdAt) : null
             }
         });
 
     } catch (error) {
         console.error("Error updating customer status:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -333,10 +353,10 @@ export const getDefaultCustomer = async (req, res) => {
             phone: defaultCustomer.phone,
             status: defaultCustomer.status,
             isDefault: defaultCustomer.isDefault,
-            createdAt: formatDate(defaultCustomer.createdAt)
+            createdAt: defaultCustomer.createdAt ? formatLocalDate(defaultCustomer.createdAt) : null
         });
     } catch (error) {
         console.error("Error fetching default customer:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
