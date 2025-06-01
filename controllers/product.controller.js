@@ -69,6 +69,11 @@ export const validateProductForSale = async (productId) => {
     }
 };
 
+function formatDateForResponse(date) {
+    if (!date) return null;
+    return date.toISOString();
+}
+
 // Función para verificar productos próximos a vencer (1 semana)
 export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
     try {
@@ -91,7 +96,7 @@ export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
             return {
                 id: product.id,
                 name: product.name,
-                expirationDate: product.expirationDate,
+                expirationDate: formatDateForResponse(product.expirationDate),
                 stock: product.stock,
                 category: product.category?.name,
                 daysUntilExpiration: daysUntilExpiration
@@ -120,7 +125,7 @@ export const getExpirationNotifications = async (req, res) => {
         });
     } catch (error) {
         console.error("Error getting expiration notifications:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
