@@ -15,14 +15,12 @@ async function generateProductId() {
     return `Pr${nextNumber}`;
 }
 
-// FUNCIÓN ÚNICA para calcular días hasta vencimiento (reemplaza las dos que tienes)
 function calculateDaysUntilExpiration(expirationDate) {
     if (!expirationDate) return null;
     
     const currentDate = new Date();
     const expiration = new Date(expirationDate);
     
-    // Normalizar las fechas a medianoche para comparación precisa
     currentDate.setHours(0, 0, 0, 0);
     expiration.setHours(0, 0, 0, 0);
     
@@ -30,7 +28,11 @@ function calculateDaysUntilExpiration(expirationDate) {
     return Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
 }
 
-// Función para validar producto para venta
+function formatDateForResponse(date) {
+    if (!date) return null;
+    return date.toISOString();
+}
+
 export const validateProductForSale = async (productId) => {
     try {
         if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -76,11 +78,6 @@ export const validateProductForSale = async (productId) => {
     }
 };
 
-function formatDateForResponse(date) {
-    if (!date) return null;
-    return date.toISOString();
-}
-
 export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
     try {
         const currentDate = new Date();
@@ -106,7 +103,6 @@ export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
 
         const relevantProducts = expiringProducts.filter(product => {
             const daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
-            
             return daysUntilExpiration <= daysBeforeExpiration;
         });
 
@@ -127,7 +123,6 @@ export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
     }
 };
 
-// Función para obtener notificaciones de productos próximos a vencer
 export const getExpirationNotifications = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "view_products")) {
@@ -195,28 +190,47 @@ export const getProducts = async (req, res) => {
             .populate("category", "name");
 
         const productsWithDays = products.map(product => {
-            const productObj = product.toObject();
-            productObj.daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
-            
-            // Formatear fechas para enviar al frontend
-            productObj.batchDate = formatDateForResponse(product.batchDate);
-            productObj.expirationDate = formatDateForResponse(product.expirationDate);
-            
-            return productObj;
+            try {
+                const productObj = product.toObject();
+                productObj.daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
+                
+                // Formatear fechas solo si existen
+                if (product.batchDate) {
+                    productObj.batchDate = formatDateForResponse(product.batchDate);
+                }
+                if (product.expirationDate) {
+                    productObj.expirationDate = formatDateForResponse(product.expirationDate);
+                }
+                
+                return productObj;
+            } catch (error) {
+                console.error("Error processing product:", product.id, error);
+                // Retornar producto original si hay error
+                return product.toObject();
+            }
         });
 
-        const expiringProducts = await checkExpiringProducts(7);
+        // Obtener productos próximos a vencer de forma segura
+        let expiringProductsAlert = null;
+        try {
+            const expiringProducts = await checkExpiringProducts(7);
+            if (expiringProducts.length > 0) {
+                expiringProductsAlert = {
+                    message: `Tienes ${expiringProducts.length} producto(s) próximo(s) a vencer en 1 semana`,
+                    count: expiringProducts.length
+                };
+            }
+        } catch (error) {
+            console.error("Error checking expiring products:", error);
+        }
         
         res.status(200).json({
             products: productsWithDays,
-            expiringProductsAlert: expiringProducts.length > 0 ? {
-                message: `Tienes ${expiringProducts.length} producto(s) próximo(s) a vencer en 1 semana`,
-                count: expiringProducts.length
-            } : null
+            expiringProductsAlert: expiringProductsAlert
         });
     } catch (error) {
         console.error("Error fetching products:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -246,19 +260,24 @@ export const getProductById = async (req, res) => {
         const response = {
             ...product.toObject(),
             daysUntilExpiration: daysUntilExpiration,
-            // Formatear fechas para enviar al frontend
-            batchDate: formatDateForResponse(product.batchDate),
-            expirationDate: formatDateForResponse(product.expirationDate),
             expirationAlert: daysUntilExpiration <= 7 && daysUntilExpiration > 0 ? {
                 message: `Este producto vence en ${daysUntilExpiration} día(s)`,
                 daysUntilExpiration
             } : null
         };
 
+        // Formatear fechas solo si existen
+        if (product.batchDate) {
+            response.batchDate = formatDateForResponse(product.batchDate);
+        }
+        if (product.expirationDate) {
+            response.expirationDate = formatDateForResponse(product.expirationDate);
+        }
+
         res.status(200).json(response);
     } catch (error) {
         console.error("Error fetching product:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -333,11 +352,16 @@ export const postProduct = async (req, res) => {
         
         const productResponse = {
             ...savedProduct.toObject(),
-            daysUntilExpiration: daysUntilExpiration,
-            // Formatear fechas para enviar al frontend
-            batchDate: formatDateForResponse(savedProduct.batchDate),
-            expirationDate: formatDateForResponse(savedProduct.expirationDate)
+            daysUntilExpiration: daysUntilExpiration
         };
+        
+        // Formatear fechas solo si existen
+        if (savedProduct.batchDate) {
+            productResponse.batchDate = formatDateForResponse(savedProduct.batchDate);
+        }
+        if (savedProduct.expirationDate) {
+            productResponse.expirationDate = formatDateForResponse(savedProduct.expirationDate);
+        }
         
         const response = { 
             message: "Product created successfully. Stock starts at 0 and will increase with purchases.", 
@@ -449,11 +473,16 @@ export const updateProduct = async (req, res) => {
         
         const productResponse = {
             ...updatedProduct.toObject(),
-            daysUntilExpiration: daysUntilExpiration,
-            // Formatear fechas para enviar al frontend
-            batchDate: formatDateForResponse(updatedProduct.batchDate),
-            expirationDate: formatDateForResponse(updatedProduct.expirationDate)
+            daysUntilExpiration: daysUntilExpiration
         };
+        
+        // Formatear fechas solo si existen
+        if (updatedProduct.batchDate) {
+            productResponse.batchDate = formatDateForResponse(updatedProduct.batchDate);
+        }
+        if (updatedProduct.expirationDate) {
+            productResponse.expirationDate = formatDateForResponse(updatedProduct.expirationDate);
+        }
         
         const response = { 
             message: "Product updated successfully", 
@@ -515,11 +544,16 @@ export const updateProductStatus = async (req, res) => {
 
         const productResponse = {
             ...updatedProduct.toObject(),
-            daysUntilExpiration: calculateDaysUntilExpiration(updatedProduct.expirationDate),
-            // Formatear fechas para enviar al frontend
-            batchDate: formatDateForResponse(updatedProduct.batchDate),
-            expirationDate: formatDateForResponse(updatedProduct.expirationDate)
+            daysUntilExpiration: calculateDaysUntilExpiration(updatedProduct.expirationDate)
         };
+
+        // Formatear fechas solo si existen
+        if (updatedProduct.batchDate) {
+            productResponse.batchDate = formatDateForResponse(updatedProduct.batchDate);
+        }
+        if (updatedProduct.expirationDate) {
+            productResponse.expirationDate = formatDateForResponse(updatedProduct.expirationDate);
+        }
 
         const response = { 
             message: `Product ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
