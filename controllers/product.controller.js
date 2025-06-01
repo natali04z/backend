@@ -15,15 +15,22 @@ async function generateProductId() {
     return `Pr${nextNumber}`;
 }
 
-// Función auxiliar para calcular días hasta vencimiento
+// FUNCIÓN ÚNICA para calcular días hasta vencimiento (reemplaza las dos que tienes)
 function calculateDaysUntilExpiration(expirationDate) {
+    if (!expirationDate) return null;
+    
     const currentDate = new Date();
     const expiration = new Date(expirationDate);
+    
+    // Normalizar las fechas a medianoche para comparación precisa
+    currentDate.setHours(0, 0, 0, 0);
+    expiration.setHours(0, 0, 0, 0);
+    
     const timeDiff = expiration - currentDate;
     return Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
 }
 
-// Función para verificar si un producto está activo y disponible para venta
+// Función para validar producto para venta
 export const validateProductForSale = async (productId) => {
     try {
         if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -74,57 +81,32 @@ function formatDateForResponse(date) {
     return date.toISOString();
 }
 
-// Función para calcular días hasta vencimiento
-function calculateDaysUntilExpiration(expirationDate) {
-    if (!expirationDate) return null;
-    
-    const currentDate = new Date();
-    const expiration = new Date(expirationDate);
-    
-    // Normalizar las fechas a medianoche para comparación precisa
-    currentDate.setHours(0, 0, 0, 0);
-    expiration.setHours(0, 0, 0, 0);
-    
-    const timeDiff = expiration - currentDate;
-    return Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
-}
-
-// Función para verificar productos próximos a vencer (incluyendo vencidos)
 export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
     try {
         const currentDate = new Date();
-        // Normalizar a medianoche
         currentDate.setHours(0, 0, 0, 0);
         
         const alertDate = new Date();
         alertDate.setDate(currentDate.getDate() + daysBeforeExpiration);
-        alertDate.setHours(23, 59, 59, 999); // Hasta el final del día
+        alertDate.setHours(23, 59, 59, 999);
         
-        // Buscar productos que:
-        // 1. Ya vencieron (hasta 30 días atrás para historial)
-        // 2. Vencen hoy
-        // 3. Vencen en los próximos X días
         const pastDate = new Date();
-        pastDate.setDate(currentDate.getDate() - 30); // 30 días atrás para productos vencidos
+        pastDate.setDate(currentDate.getDate() - 30);
         
         const expiringProducts = await Product.find({
             status: "active",
             expirationDate: {
-                $gte: pastDate,  // Desde hace 30 días
-                $lte: alertDate  // Hasta los próximos X días
+                $gte: pastDate,
+                $lte: alertDate
             }
         })
         .select("id name expirationDate stock category")
         .populate("category", "name")
-        .sort({ expirationDate: 1 }); // Ordenar por fecha de vencimiento (más urgente primero)
+        .sort({ expirationDate: 1 });
 
-        // Filtrar solo los que realmente necesitan notificación
         const relevantProducts = expiringProducts.filter(product => {
             const daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
             
-            // Incluir si:
-            // - Ya venció (días negativos o 0)
-            // - Vence en los próximos daysBeforeExpiration días
             return daysUntilExpiration <= daysBeforeExpiration;
         });
 
@@ -154,7 +136,6 @@ export const getExpirationNotifications = async (req, res) => {
 
         const daysBeforeExpiration = req.query.days ? parseInt(req.query.days) : 7;
         
-        // Validar que el parámetro sea válido
         if (daysBeforeExpiration < 1 || daysBeforeExpiration > 365) {
             return res.status(400).json({ 
                 message: "Invalid days parameter. Must be between 1 and 365" 
@@ -163,7 +144,6 @@ export const getExpirationNotifications = async (req, res) => {
         
         const expiringProducts = await checkExpiringProducts(daysBeforeExpiration);
 
-        // Separar por urgencia para el mensaje
         const expiredProducts = expiringProducts.filter(p => p.daysUntilExpiration <= 0);
         const urgentProducts = expiringProducts.filter(p => p.daysUntilExpiration > 0 && p.daysUntilExpiration <= 3);
         const soonProducts = expiringProducts.filter(p => p.daysUntilExpiration > 3 && p.daysUntilExpiration <= daysBeforeExpiration);
