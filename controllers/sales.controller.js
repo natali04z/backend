@@ -4,43 +4,94 @@ import Product from "../models/product.js";
 import Customer from "../models/customer.js";
 import { checkPermission } from "../utils/permissions.js";
 
-// Generar ID personalizado para la venta
-async function generateSaleId() {
-    const lastSale = await Sale.findOne().sort({ createdAt: -1 });
-    if (!lastSale || !/^Sa\d{2}$/.test(lastSale.id)) {
-        return "Sa01";
-    }
+// ===== FUNCIONES HELPER PARA FECHAS =====
 
-    const lastNumber = parseInt(lastSale.id.substring(2), 10);
-    const nextNumber = (lastNumber + 1).toString().padStart(2, "0");
-    return `Sa${nextNumber}`;
+/**
+ * Convierte una fecha a formato YYYY-MM-DD respetando la zona horaria local
+ * @param {Date|string} date - Fecha a convertir
+ * @returns {string} Fecha en formato YYYY-MM-DD
+ */
+function formatLocalDate(date = new Date()) {
+    const dateObj = date instanceof Date ? date : new Date(date);
+    
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
 }
 
-// Función para crear fecha local sin problemas de zona horaria
-function createLocalDate(dateString) {
+/**
+ * Convierte fecha de string YYYY-MM-DD a objeto Date (zona local)
+ * @param {string} dateString
+ * @returns {Date}
+ */
+function parseLocalDate(dateString) {
     if (!dateString) return new Date();
     
-    // Si viene en formato DD/MM/YYYY, convertir a YYYY-MM-DD
-    if (dateString.includes('/')) {
-        const [day, month, year] = dateString.split('/');
-        dateString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day);
     }
     
-    // Crear fecha en zona horaria local para evitar el desfase
-    const [year, month, day] = dateString.split('-');
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    return new Date(dateString);
 }
 
-// Función para formatear fecha a DD/MM/YYYY
-function formatDateToDDMMYYYY(date) {
-    if (!date) return null;
+// Generar ID personalizado para la venta
+async function generateSaleId() {
+    try {
+        const lastSale = await Sale.findOne()
+            .sort({ id: -1 })
+            .select('id');
+            
+        if (!lastSale || !lastSale.id || !/^Sa\d{2}$/.test(lastSale.id)) {
+            const existingSa01 = await Sale.findOne({ id: "Sa01" });
+            if (existingSa01) {
+                return await findNextAvailableSaleId();
+            }
+            return "Sa01";
+        }
+
+        const lastNumber = parseInt(lastSale.id.substring(2), 10);
+        let nextNumber = lastNumber + 1;
+        let attempts = 0;
+        const maxAttempts = 100;
+        
+        while (attempts < maxAttempts) {
+            const candidateId = `Sa${String(nextNumber).padStart(2, "0")}`;
+            
+            const existing = await Sale.findOne({ id: candidateId });
+            
+            if (!existing) {
+                return candidateId;
+            }
+            
+            nextNumber++;
+            attempts++;
+        }
+        
+        const timestamp = Date.now().toString().slice(-4);
+        return `Sa${timestamp}`;
+        
+    } catch (error) {
+        const emergencyId = `Sa${Date.now().toString().slice(-4)}`;
+        return emergencyId;
+    }
+}
+
+async function findNextAvailableSaleId() {
+    for (let i = 1; i <= 99; i++) {
+        const candidateId = `Sa${String(i).padStart(2, "0")}`;
+        const existing = await Sale.findOne({ id: candidateId });
+        
+        if (!existing) {
+            return candidateId;
+        }
+    }
     
-    const d = new Date(date);
-    const day = d.getDate().toString().padStart(2, '0');
-    const month = (d.getMonth() + 1).toString().padStart(2, '0');
-    const year = d.getFullYear();
-    
-    return `${day}/${month}/${year}`;
+    // Si todos los números del 01 al 99 están ocupados
+    const timestamp = Date.now().toString().slice(-4);
+    return `Sa${timestamp}`;
 }
 
 // Función para validar datos de venta
@@ -72,16 +123,9 @@ function validateSaleData(data, isUpdate = false) {
     }
     
     if (data.salesDate !== undefined) {
-        // Aceptar formatos DD/MM/YYYY o YYYY-MM-DD
-        const ddmmyyyyRegex = /^\d{2}\/\d{2}\/\d{4}$/;
-        const yyyymmddRegex = /^\d{4}-\d{2}-\d{2}$/;
-        const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
-        
-        if (!ddmmyyyyRegex.test(data.salesDate) && 
-            !yyyymmddRegex.test(data.salesDate) && 
-            !isoRegex.test(data.salesDate) && 
-            !(data.salesDate instanceof Date)) {
-            errors.push("Invalid date format. Use DD/MM/YYYY or YYYY-MM-DD format");
+        const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z)?$/;
+        if (!dateRegex.test(data.salesDate) && !(data.salesDate instanceof Date)) {
+            errors.push("Invalid date format. Use YYYY-MM-DD or ISO format");
         }
     }
     
@@ -155,9 +199,17 @@ export const getSales = async (req, res) => {
         const formattedSales = sales.map(sale => {
             const saleObj = sale.toObject();
             
-            // Formatear fecha a DD/MM/YYYY
             if (saleObj.salesDate) {
-                saleObj.salesDate = formatDateToDDMMYYYY(saleObj.salesDate);
+                saleObj.salesDate = formatLocalDate(saleObj.salesDate);
+            }
+            
+            if (saleObj.products && Array.isArray(saleObj.products)) {
+                saleObj.products = saleObj.products.map(item => {
+                    return {
+                        ...item,
+                        quantity: item.quantity || 0
+                    };
+                });
             }
             
             return saleObj;
@@ -193,9 +245,17 @@ export const getSaleById = async (req, res) => {
 
         const formattedSale = sale.toObject();
         
-        // Formatear fecha a DD/MM/YYYY
         if (formattedSale.salesDate) {
-            formattedSale.salesDate = formatDateToDDMMYYYY(formattedSale.salesDate);
+            formattedSale.salesDate = formatLocalDate(formattedSale.salesDate);
+        }
+        
+        if (formattedSale.products && Array.isArray(formattedSale.products)) {
+            formattedSale.products = formattedSale.products.map(item => {
+                return {
+                    ...item,
+                    quantity: item.quantity || 0
+                };
+            });
         }
 
         res.status(200).json(formattedSale);
@@ -246,8 +306,7 @@ export const postSale = async (req, res) => {
 
         const saleId = await generateSaleId();
 
-        // Crear fecha local para evitar problemas de zona horaria
-        const saleDate = salesDate ? createLocalDate(salesDate) : new Date();
+        const saleDate = salesDate ? parseLocalDate(salesDate) : new Date();
 
         const newSale = new Sale({
             id: saleId,
@@ -271,9 +330,8 @@ export const postSale = async (req, res) => {
 
         const formattedSale = createdSale.toObject();
         
-        // Formatear fecha a DD/MM/YYYY
         if (formattedSale.salesDate) {
-            formattedSale.salesDate = formatDateToDDMMYYYY(formattedSale.salesDate);
+            formattedSale.salesDate = formatLocalDate(formattedSale.salesDate);
         }
 
         res.status(201).json({ 
@@ -283,6 +341,12 @@ export const postSale = async (req, res) => {
 
     } catch (error) {
         console.error("Error creating sale:", error);
+        
+        if (error.code === 11000 && error.keyPattern?.id) {
+            return res.status(409).json({ 
+                message: "Sale ID conflict, please try again"
+            });
+        }
         
         if (error.message.includes("Invalid product") || 
             error.message.includes("not found") || 
@@ -387,9 +451,8 @@ export const updateSaleStatus = async (req, res) => {
 
         const formattedSale = updatedSale.toObject();
         
-        // Formatear fecha a DD/MM/YYYY
         if (formattedSale.salesDate) {
-            formattedSale.salesDate = formatDateToDDMMYYYY(formattedSale.salesDate);
+            formattedSale.salesDate = formatLocalDate(formattedSale.salesDate);
         }
 
         const statusMessages = {
