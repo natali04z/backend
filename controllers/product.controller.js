@@ -194,14 +194,17 @@ export const getProducts = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        // Agregar días hasta vencimiento a cada producto
         const productsWithDays = products.map(product => {
             const productObj = product.toObject();
             productObj.daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
+            
+            // Formatear fechas para enviar al frontend
+            productObj.batchDate = formatDateForResponse(product.batchDate);
+            productObj.expirationDate = formatDateForResponse(product.expirationDate);
+            
             return productObj;
         });
 
-        // Verificar productos próximos a vencer (1 semana)
         const expiringProducts = await checkExpiringProducts(7);
         
         res.status(200).json({
@@ -238,12 +241,14 @@ export const getProductById = async (req, res) => {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        // Calcular días hasta vencimiento
         const daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
         
         const response = {
             ...product.toObject(),
             daysUntilExpiration: daysUntilExpiration,
+            // Formatear fechas para enviar al frontend
+            batchDate: formatDateForResponse(product.batchDate),
+            expirationDate: formatDateForResponse(product.expirationDate),
             expirationAlert: daysUntilExpiration <= 7 && daysUntilExpiration > 0 ? {
                 message: `Este producto vence en ${daysUntilExpiration} día(s)`,
                 daysUntilExpiration
@@ -307,7 +312,6 @@ export const postProduct = async (req, res) => {
             return res.status(400).json({ message: "Expiration date must be after batch date" });
         }
 
-        // Calcular días hasta vencimiento
         const daysUntilExpiration = calculateDaysUntilExpiration(expirationDateObj);
         
         const id = await generateProductId();
@@ -329,7 +333,10 @@ export const postProduct = async (req, res) => {
         
         const productResponse = {
             ...savedProduct.toObject(),
-            daysUntilExpiration: daysUntilExpiration
+            daysUntilExpiration: daysUntilExpiration,
+            // Formatear fechas para enviar al frontend
+            batchDate: formatDateForResponse(savedProduct.batchDate),
+            expirationDate: formatDateForResponse(savedProduct.expirationDate)
         };
         
         const response = { 
@@ -337,7 +344,6 @@ export const postProduct = async (req, res) => {
             product: productResponse
         };
 
-        // Agregar alerta si el producto vence en 1 semana o menos
         if (daysUntilExpiration <= 7 && daysUntilExpiration > 0) {
             response.expirationAlert = {
                 message: `Advertencia: Este producto vence en ${daysUntilExpiration} día(s)`,
@@ -439,12 +445,14 @@ export const updateProduct = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        // Calcular días hasta vencimiento
         const daysUntilExpiration = calculateDaysUntilExpiration(updatedProduct.expirationDate);
         
         const productResponse = {
             ...updatedProduct.toObject(),
-            daysUntilExpiration: daysUntilExpiration
+            daysUntilExpiration: daysUntilExpiration,
+            // Formatear fechas para enviar al frontend
+            batchDate: formatDateForResponse(updatedProduct.batchDate),
+            expirationDate: formatDateForResponse(updatedProduct.expirationDate)
         };
         
         const response = { 
@@ -505,10 +513,12 @@ export const updateProductStatus = async (req, res) => {
             return res.status(404).json({ message: "Product not found after update" });
         }
 
-        // Agregar días hasta vencimiento
         const productResponse = {
             ...updatedProduct.toObject(),
-            daysUntilExpiration: calculateDaysUntilExpiration(updatedProduct.expirationDate)
+            daysUntilExpiration: calculateDaysUntilExpiration(updatedProduct.expirationDate),
+            // Formatear fechas para enviar al frontend
+            batchDate: formatDateForResponse(updatedProduct.batchDate),
+            expirationDate: formatDateForResponse(updatedProduct.expirationDate)
         };
 
         const response = { 
