@@ -5,18 +5,17 @@ import { checkPermission } from "../utils/permissions.js";
 // ===== FUNCIONES HELPER PARA FECHAS =====
 
 /**
- * Convierte una fecha a formato YYYY-MM-DD respetando la zona horaria local
- * @param {Date|string} date - Fecha a convertir
- * @returns {string} Fecha en formato YYYY-MM-DD
+ * Formatea una fecha de MongoDB para enviar al frontend
+ * Mantiene la fecha original sin conversiones de zona horaria
+ * @param {Date} date - Fecha de MongoDB
+ * @returns {string} Fecha en formato ISO (YYYY-MM-DDTHH:mm:ss.sssZ)
  */
-function formatLocalDate(date = new Date()) {
-    const dateObj = date instanceof Date ? date : new Date(date);
+function formatDateForResponse(date) {
+    if (!date) return null;
     
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    
-    return `${year}-${month}-${day}`;
+    // Simplemente devolver la fecha ISO tal como viene de MongoDB
+    // El frontend se encargará del formateo para mostrar
+    return date.toISOString();
 }
 
 /**
@@ -55,7 +54,7 @@ export const getCustomers = async (req, res) => {
             phone: customer.phone,
             status: customer.status,
             isDefault: customer.isDefault || false,
-            createdAt: customer.createdAt ? formatLocalDate(customer.createdAt) : null
+            createdAt: formatDateForResponse(customer.createdAt)
         }));
 
         res.status(200).json(formattedCustomers);
@@ -92,7 +91,7 @@ export const getCustomerById = async (req, res) => {
             phone: customer.phone,
             status: customer.status,
             isDefault: customer.isDefault || false,
-            createdAt: customer.createdAt ? formatLocalDate(customer.createdAt) : null
+            createdAt: formatDateForResponse(customer.createdAt)
         });
     } catch (error) {
         console.error("Error fetching customer:", error);
@@ -148,7 +147,7 @@ export const createCustomer = async (req, res) => {
                 phone: savedCustomer.phone,
                 status: savedCustomer.status,
                 isDefault: savedCustomer.isDefault,
-                createdAt: savedCustomer.createdAt ? formatLocalDate(savedCustomer.createdAt) : null
+                createdAt: formatDateForResponse(savedCustomer.createdAt)
             }
         });
 
@@ -235,7 +234,7 @@ export const updateCustomer = async (req, res) => {
                 phone: updatedCustomer.phone,
                 status: updatedCustomer.status,
                 isDefault: updatedCustomer.isDefault,
-                createdAt: updatedCustomer.createdAt ? formatLocalDate(updatedCustomer.createdAt) : null
+                createdAt: formatDateForResponse(updatedCustomer.createdAt)
             }
         });
 
@@ -326,7 +325,7 @@ export const updateCustomerStatus = async (req, res) => {
                 phone: updatedCustomer.phone,
                 status: updatedCustomer.status,
                 isDefault: updatedCustomer.isDefault,
-                createdAt: updatedCustomer.createdAt ? formatLocalDate(updatedCustomer.createdAt) : null
+                createdAt: formatDateForResponse(updatedCustomer.createdAt)
             }
         });
 
@@ -353,7 +352,7 @@ export const getDefaultCustomer = async (req, res) => {
             phone: defaultCustomer.phone,
             status: defaultCustomer.status,
             isDefault: defaultCustomer.isDefault,
-            createdAt: defaultCustomer.createdAt ? formatLocalDate(defaultCustomer.createdAt) : null
+            createdAt: formatDateForResponse(defaultCustomer.createdAt)
         });
     } catch (error) {
         console.error("Error fetching default customer:", error);
