@@ -16,6 +16,33 @@ async function generateSaleId() {
     return `Sa${nextNumber}`;
 }
 
+// Función para crear fecha local sin problemas de zona horaria
+function createLocalDate(dateString) {
+    if (!dateString) return new Date();
+    
+    // Si viene en formato DD/MM/YYYY, convertir a YYYY-MM-DD
+    if (dateString.includes('/')) {
+        const [day, month, year] = dateString.split('/');
+        dateString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+    
+    // Crear fecha en zona horaria local para evitar el desfase
+    const [year, month, day] = dateString.split('-');
+    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+}
+
+// Función para formatear fecha a DD/MM/YYYY
+function formatDateToDDMMYYYY(date) {
+    if (!date) return null;
+    
+    const d = new Date(date);
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+}
+
 // Función para validar datos de venta
 function validateSaleData(data, isUpdate = false) {
     const errors = [];
@@ -45,9 +72,16 @@ function validateSaleData(data, isUpdate = false) {
     }
     
     if (data.salesDate !== undefined) {
-        const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z)?$/;
-        if (!dateRegex.test(data.salesDate) && !(data.salesDate instanceof Date)) {
-            errors.push("Invalid date format. Use YYYY-MM-DD or ISO format");
+        // Aceptar formatos DD/MM/YYYY o YYYY-MM-DD
+        const ddmmyyyyRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+        const yyyymmddRegex = /^\d{4}-\d{2}-\d{2}$/;
+        const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
+        
+        if (!ddmmyyyyRegex.test(data.salesDate) && 
+            !yyyymmddRegex.test(data.salesDate) && 
+            !isoRegex.test(data.salesDate) && 
+            !(data.salesDate instanceof Date)) {
+            errors.push("Invalid date format. Use DD/MM/YYYY or YYYY-MM-DD format");
         }
     }
     
@@ -121,8 +155,9 @@ export const getSales = async (req, res) => {
         const formattedSales = sales.map(sale => {
             const saleObj = sale.toObject();
             
+            // Formatear fecha a DD/MM/YYYY
             if (saleObj.salesDate) {
-                saleObj.salesDate = new Date(saleObj.salesDate).toISOString().split('T')[0];
+                saleObj.salesDate = formatDateToDDMMYYYY(saleObj.salesDate);
             }
             
             return saleObj;
@@ -158,8 +193,9 @@ export const getSaleById = async (req, res) => {
 
         const formattedSale = sale.toObject();
         
+        // Formatear fecha a DD/MM/YYYY
         if (formattedSale.salesDate) {
-            formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
+            formattedSale.salesDate = formatDateToDDMMYYYY(formattedSale.salesDate);
         }
 
         res.status(200).json(formattedSale);
@@ -210,6 +246,9 @@ export const postSale = async (req, res) => {
 
         const saleId = await generateSaleId();
 
+        // Crear fecha local para evitar problemas de zona horaria
+        const saleDate = salesDate ? createLocalDate(salesDate) : new Date();
+
         const newSale = new Sale({
             id: saleId,
             customer,
@@ -219,9 +258,9 @@ export const postSale = async (req, res) => {
                 sale_price: item.sale_price,
                 total: item.total
             })),
-            salesDate: salesDate ? new Date(salesDate) : new Date(),
+            salesDate: saleDate,
             total,
-            status: "processing" // Estado predeterminado cambiado a "processing"
+            status: "processing"
         });
 
         await newSale.save();
@@ -232,8 +271,9 @@ export const postSale = async (req, res) => {
 
         const formattedSale = createdSale.toObject();
         
+        // Formatear fecha a DD/MM/YYYY
         if (formattedSale.salesDate) {
-            formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
+            formattedSale.salesDate = formatDateToDDMMYYYY(formattedSale.salesDate);
         }
 
         res.status(201).json({ 
@@ -269,7 +309,6 @@ export const updateSaleStatus = async (req, res) => {
             return res.status(400).json({ message: "Invalid sale ID format" });
         }
 
-        // Estados válidos actualizados (sin "pending")
         const validStatuses = ["processing", "completed", "cancelled"];
         if (!status || !validStatuses.includes(status)) {
             return res.status(400).json({ 
@@ -283,7 +322,6 @@ export const updateSaleStatus = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
 
-        // No permitir cambios si la venta está completada o cancelada
         if (currentSale.status === "completed") {
             return res.status(400).json({ 
                 message: "Cannot change status of a completed sale." 
@@ -302,11 +340,10 @@ export const updateSaleStatus = async (req, res) => {
             });
         }
         
-        // Transiciones permitidas actualizadas
         const allowedTransitions = {
             "processing": ["completed", "cancelled"],
-            "completed": [], // No se puede cambiar desde completed
-            "cancelled": []  // No se puede cambiar desde cancelled
+            "completed": [],
+            "cancelled": []
         };
 
         if (!allowedTransitions[currentSale.status].includes(status)) {
@@ -317,11 +354,7 @@ export const updateSaleStatus = async (req, res) => {
 
         // Manejar stock según el cambio de estado
         if (currentSale.status === "processing") {
-            if (status === "completed") {
-                // De processing a completed: El stock ya está reservado, 
-                // no necesita cambios adicionales (queda consumido definitivamente)
-                // No hay cambios en el stock
-            } else if (status === "cancelled") {
+            if (status === "cancelled") {
                 // De processing a cancelled: Restaurar stock reservado
                 for (const item of currentSale.products) {
                     const product = await Product.findById(item.product);
@@ -331,7 +364,6 @@ export const updateSaleStatus = async (req, res) => {
                         });
                     }
 
-                    // Restaurar stock al cancelar
                     await Product.findByIdAndUpdate(
                         item.product,
                         { $inc: { stock: item.quantity } },
@@ -355,11 +387,11 @@ export const updateSaleStatus = async (req, res) => {
 
         const formattedSale = updatedSale.toObject();
         
+        // Formatear fecha a DD/MM/YYYY
         if (formattedSale.salesDate) {
-            formattedSale.salesDate = new Date(formattedSale.salesDate).toISOString().split('T')[0];
+            formattedSale.salesDate = formatDateToDDMMYYYY(formattedSale.salesDate);
         }
 
-        // Mensajes actualizados con la lógica de reserva/consumo
         const statusMessages = {
             "processing": "Sale is being processed with stock reserved", 
             "completed": "Sale completed successfully - stock consumed permanently",
@@ -397,7 +429,6 @@ export const deleteSale = async (req, res) => {
             return res.status(404).json({ message: "Sale not found" });
         }
         
-        // Actualizar condiciones para permitir eliminar solo ventas en processing o cancelled
         if (!["processing", "cancelled"].includes(saleToDelete.status)) {
             return res.status(400).json({ 
                 message: "Cannot delete sale that is completed. Only processing or cancelled sales can be deleted." 

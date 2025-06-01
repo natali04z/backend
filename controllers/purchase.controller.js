@@ -4,15 +4,46 @@ import Product from "../models/product.js";
 import Provider from "../models/provider.js";
 import { checkPermission } from "../utils/permissions.js";
 
+// ===== FUNCIONES HELPER PARA FECHAS =====
+
+/**
+ * Convierte una fecha a formato YYYY-MM-DD respetando la zona horaria local
+ * @param {Date|string} date - Fecha a convertir
+ * @returns {string} Fecha en formato YYYY-MM-DD
+ */
+function formatLocalDate(date = new Date()) {
+    const dateObj = date instanceof Date ? date : new Date(date);
+    
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Convierte fecha de string YYYY-MM-DD a objeto Date (zona local)
+ * @param {string} dateString
+ * @returns {Date}
+ */
+function parseLocalDate(dateString) {
+    if (!dateString) return new Date();
+    
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day);
+    }
+    
+    return new Date(dateString);
+}
+
 async function generatePurchaseId() {
     try {
-        // Buscar la última compra por ID, no por fecha
         const lastPurchase = await Purchase.findOne()
             .sort({ id: -1 })
             .select('id');
             
         if (!lastPurchase || !lastPurchase.id || !/^Pu\d{2}$/.test(lastPurchase.id)) {
-            // Verificar que Pu01 no exista
             const existingPu01 = await Purchase.findOne({ id: "Pu01" });
             if (existingPu01) {
                 return await findNextAvailableId();
@@ -28,7 +59,6 @@ async function generatePurchaseId() {
         while (attempts < maxAttempts) {
             const candidateId = `Pu${String(nextNumber).padStart(2, "0")}`;
             
-            // Verificar si ya existe
             const existing = await Purchase.findOne({ id: candidateId });
             
             if (!existing) {
@@ -39,12 +69,10 @@ async function generatePurchaseId() {
             attempts++;
         }
         
-        // Fallback con timestamp si hay demasiados registros
         const timestamp = Date.now().toString().slice(-4);
         return `Pu${timestamp}`;
         
     } catch (error) {
-        // ID de emergencia con timestamp
         const emergencyId = `Pu${Date.now().toString().slice(-4)}`;
         return emergencyId;
     }
@@ -116,7 +144,7 @@ export const getPurchases = async (req, res) => {
             const purchaseObj = purchase.toObject();
             
             if (purchaseObj.purchase_date) {
-                purchaseObj.purchase_date = new Date(purchaseObj.purchase_date).toISOString().split('T')[0];
+                purchaseObj.purchase_date = formatLocalDate(purchaseObj.purchase_date);
             }
             
             if (purchaseObj.products && Array.isArray(purchaseObj.products)) {
@@ -161,7 +189,7 @@ export const getPurchaseById = async (req, res) => {
         const formattedPurchase = purchase.toObject();
         
         if (formattedPurchase.purchase_date) {
-            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
         }
         
         if (formattedPurchase.products && Array.isArray(formattedPurchase.products)) {
@@ -232,11 +260,13 @@ export const postPurchase = async (req, res) => {
 
         const purchaseId = await generatePurchaseId();
 
+        const purchaseDate = purchase_date ? parseLocalDate(purchase_date) : new Date();
+
         const newPurchase = new Purchase({
             id: purchaseId,
             provider,
             products: validatedProducts,
-            purchase_date: purchase_date || new Date(),
+            purchase_date: purchaseDate,
             total
         });
 
@@ -245,7 +275,7 @@ export const postPurchase = async (req, res) => {
         const formattedPurchase = newPurchase.toObject();
         
         if (formattedPurchase.purchase_date) {
-            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
         }
 
         res.status(201).json({ 
@@ -254,7 +284,6 @@ export const postPurchase = async (req, res) => {
         });
         
     } catch (error) {
-        // Manejo específico para errores de duplicado
         if (error.code === 11000 && error.keyPattern?.id) {
             return res.status(409).json({ 
                 message: "Purchase ID conflict, please try again"
@@ -336,7 +365,7 @@ export const deactivatePurchase = async (req, res) => {
         const formattedPurchase = updatedPurchase.toObject();
         
         if (formattedPurchase.purchase_date) {
-            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
         }
 
         res.status(200).json({ 
