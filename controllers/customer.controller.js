@@ -2,13 +2,17 @@ import Customer from "../models/customer.js";
 import mongoose from "mongoose";
 import { checkPermission } from "../utils/permissions.js";
 
+// Función para formatear fecha a DD/MM/YYYY
 const formatDate = (date) => {
   if (!date) return null;
-  return new Date(date).toLocaleDateString('es-ES', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  
+  // Crear fecha local para evitar problemas de zona horaria
+  const d = new Date(date);
+  const day = d.getDate().toString().padStart(2, '0');
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const year = d.getFullYear();
+  
+  return `${day}/${month}/${year}`;
 };
 
 // Obtener todos los clientes
