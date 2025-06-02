@@ -94,13 +94,20 @@ export const validateProductForSale = async (productId) => {
 // Get all products
 export const getProducts = async (req, res) => {
     try {
+        console.log("🔍 getProducts iniciado");
+        console.log("Usuario:", req.user);
+        
         if (!checkPermission(req.user.role, "view_products")) {
+            console.log("❌ Sin permisos para ver productos");
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
+        console.log("🔍 Consultando productos en BD...");
         const products = await Product.find()
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
+
+        console.log("✅ Productos encontrados:", products.length);
 
         const productsWithDays = products.map(product => {
             const productObj = product.toObject();
@@ -108,18 +115,38 @@ export const getProducts = async (req, res) => {
             return productObj;
         });
 
-        const expiringProducts = await checkExpiringProducts(7);
+        // Calcular productos próximos a vencer (opcional, sin función externa)
+        const currentDate = new Date();
+        const sevenDaysFromNow = new Date();
+        sevenDaysFromNow.setDate(currentDate.getDate() + 7);
+
+        const expiringProducts = products.filter(product => {
+            if (!product.expirationDate) return false;
+            const expDate = new Date(product.expirationDate);
+            return expDate >= currentDate && expDate <= sevenDaysFromNow && product.status === "active";
+        });
         
-        res.status(200).json({
-            products: productsWithDays,
-            expiringProductsAlert: expiringProducts.length > 0 ? {
+        const response = {
+            products: productsWithDays
+        };
+
+        // Agregar alerta solo si hay productos próximos a vencer
+        if (expiringProducts.length > 0) {
+            response.expiringProductsAlert = {
                 message: `Tienes ${expiringProducts.length} producto(s) próximo(s) a vencer en 1 semana`,
                 count: expiringProducts.length
-            } : null
-        });
+            };
+        }
+
+        console.log("✅ Respuesta enviada exitosamente");
+        res.status(200).json(response);
     } catch (error) {
-        console.error("Error fetching products:", error);
-        res.status(500).json({ message: "Server error", details: error.message });
+        console.error("❌ Error completo en getProducts:", error);
+        console.error("Stack trace:", error.stack);
+        res.status(500).json({ 
+            message: "Server error", 
+            details: error.message 
+        });
     }
 };
 
