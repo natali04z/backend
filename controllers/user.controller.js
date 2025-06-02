@@ -10,6 +10,21 @@ const roleTranslations = {
     // Añade más roles según sea necesario
 };
 
+// Función auxiliar para validar teléfono
+function validatePhone(phone) {
+    if (!phone) return { isValid: false, message: "Contact phone is required" };
+    
+    if (!/^\d+$/.test(phone)) {
+        return { isValid: false, message: "Contact phone must contain only digits" };
+    }
+    
+    if (phone.length < 10) {
+        return { isValid: false, message: "Contact phone must be at least 10 digits" };
+    }
+    
+    return { isValid: true };
+}
+
 // Función para procesar usuarios y añadir displayName para roles
 const processUserWithDisplayName = (user) => {
     if (!user) return null;
@@ -114,8 +129,24 @@ export const putUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid user ID" });
         }
         
-        if (contact_number && !/^\d+$/.test(contact_number)) {
-            return res.status(400).json({ message: "Phone number must contain only digits" });
+        // Validar teléfono si se proporciona
+        if (contact_number !== undefined) {
+            if (contact_number === "") {
+                return res.status(400).json({ 
+                    success: false,
+                    message: "Contact phone cannot be empty",
+                    field: "contact_number"
+                });
+            }
+            
+            const phoneValidation = validatePhone(contact_number.toString().trim());
+            if (!phoneValidation.isValid) {
+                return res.status(400).json({ 
+                    success: false,
+                    message: phoneValidation.message,
+                    field: "contact_number"
+                });
+            }
         }
         
         if (!req.user) {
@@ -145,7 +176,12 @@ export const putUser = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized to edit this user" });
         }
 
-        let updateData = { name, lastname, contact_number, email };
+        let updateData = { name, lastname, email };
+
+        // Validar y agregar contact_number si se proporciona
+        if (contact_number !== undefined) {
+            updateData.contact_number = contact_number.toString().trim();
+        }
 
         if (role && currentUserId === id) {
             return res.status(403).json({ message: "You cannot update your own role" });
