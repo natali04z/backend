@@ -4,13 +4,12 @@ import {
   loginUser,
   getAuthenticatedUser,
   verifyEmail,
-  resetPassword
+  resetPassword,
 } from "../controllers/auth.controller.js";
 import { authenticateUser, authorizePermission } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-// Authentication routes
 router.post("/register", authenticateUser, authorizePermission("create_users"), registerUser);
 router.post("/login", loginUser);
 router.get("/me", authenticateUser, getAuthenticatedUser);
