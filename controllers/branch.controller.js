@@ -1,4 +1,5 @@
 import Branch from "../models/branches.js";
+import mongoose from "mongoose";
 
 async function generateBranchId() {
     const lastBranch = await Branch.findOne().sort({ id: -1 });
@@ -63,6 +64,13 @@ function validateBranchData(data, isUpdate = false) {
         isValid: Object.keys(errors).length === 0,
         errors
     };
+}
+
+// Función auxiliar para verificar permisos (opcional si usas middleware)
+function checkPermission(userRole, permission) {
+    // Esta función ya no es necesaria si usas middleware de autorización
+    // Pero la mantengo por compatibilidad
+    return true;
 }
 
 // Get all branches
@@ -264,22 +272,27 @@ export const deleteBranches = async (req, res) => {
     }
 };
 
-// Update branch status
+// Update branch status - CORREGIDO para coincidir con el frontend
 export const updateBranchStatus = async (req, res) => {
     try {
+        console.log("=== UPDATE BRANCH STATUS ===");
+        console.log("ID:", req.params.id);
+        console.log("Body:", req.body);
+        console.log("User:", req.user); // Debug para ver el usuario autenticado
+
         const { id } = req.params;
         const { status } = req.body;
 
-        // Validate status
-        if (!status || !["active", "inactive", "pending"].includes(status)) {
+        // Validar que el status sea válido
+        if (!status || !["active", "inactive"].includes(status)) {
             return res.status(400).json({ 
                 success: false,
-                message: "Status must be 'active', 'inactive' or 'pending'" 
+                message: "Status must be 'active' or 'inactive'" 
             });
         }
 
-        // Check if branch exists
-        const existingBranch = await Branch.findOne({ id });
+        // Buscar la sucursal usando el ID personalizado
+        const existingBranch = await Branch.findOne({ id: id });
         if (!existingBranch) {
             return res.status(404).json({ 
                 success: false,
@@ -287,41 +300,59 @@ export const updateBranchStatus = async (req, res) => {
             });
         }
 
-        // Update branch status
-        const updatedBranch = await Branch.findOneAndUpdate(
-            { id },
-            { status },
-            { new: true, runValidators: true }
-        ).select("id name status");
-
-        if (!updatedBranch) {
-            return res.status(404).json({ 
-                success: false,
-                message: "Branch not found" 
-            });
+        // Si se está desactivando, verificar dependencias (opcional)
+        if (status === 'inactive') {
+            // Aquí puedes agregar verificaciones adicionales
+            // Por ejemplo, verificar si hay empleados activos
+            console.log("Deactivating branch, checking dependencies...");
+            
+            // Ejemplo de verificación de dependencias (descomenta si tienes modelo Employee)
+            /*
+            try {
+                const Employee = mongoose.model('Employee');
+                const activeEmployeesCount = await Employee.countDocuments({
+                    branchId: id, // o branch: existingBranch._id, dependiendo de tu esquema
+                    status: 'active'
+                });
+                
+                if (activeEmployeesCount > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Cannot deactivate this branch. It has ${activeEmployeesCount} active employees associated with it. Please deactivate or reassign these employees first.`
+                    });
+                }
+            } catch (employeeError) {
+                console.log("Employee model not found or error checking dependencies:", employeeError.message);
+            }
+            */
         }
 
-        // Return success response
-        res.status(200).json({ 
+        // Actualizar el estado de la sucursal
+        const updatedBranch = await Branch.findOneAndUpdate(
+            { id: id },
+            { status: status },
+            { new: true, runValidators: true }
+        );
+
+        console.log("Branch status updated successfully:", updatedBranch);
+
+        // Respuesta de éxito
+        res.status(200).json({
             success: true,
-            message: `Branch ${status === 'active' ? 'activated' : (status === 'inactive' ? 'deactivated' : 'set to pending')} successfully`, 
-            branch: updatedBranch 
+            message: `Branch ${status === 'active' ? 'activated' : 'deactivated'} successfully`,
+            branch: {
+                id: updatedBranch.id,
+                name: updatedBranch.name,
+                status: updatedBranch.status
+            }
         });
+
     } catch (error) {
         console.error("Error updating branch status:", error);
         res.status(500).json({ 
             success: false,
-            message: "Error updating branch status", 
+            message: "Server error",
             error: error.message 
         });
     }
-};
-
-export default {
-    getBranches,
-    getBranchesById,
-    postBranches,
-    updateBranches,
-    deleteBranches,
-    updateBranchStatus
 };
