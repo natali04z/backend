@@ -4,34 +4,35 @@ const ProductSchema = new mongoose.Schema({
   id: { type: String, unique: true, required: true, trim: true },
   name: { type: String, required: true, trim: true },
   category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },
-  price: { 
-    type: Number, 
+  price: {
+    type: Number,
     required: true,
     min: [0, 'Price cannot be negative'],
     validate: {
       validator: function(v) {
-        return Number.isInteger(v) && v >= 0;
+        // CAMBIO: Permitir decimales, no solo enteros
+        return typeof v === 'number' && v >= 0;
       },
-      message: props => `${props.value} is not a valid price. Price must be a positive integer`
+      message: props => `${props.value} is not a valid price. Price must be a positive number`
     }
   },
-  batchDate: { 
-    type: Date, 
-    required: true, 
-    get: function(date) { 
+  batchDate: {
+    type: Date,
+    required: true,
+    get: function(date) {
       return date ? date.toISOString().split('T')[0] : null;
     }
   },
-  expirationDate: { 
-    type: Date, 
-    required: true, 
-    get: function(date) { 
+  expirationDate: {
+    type: Date,
+    required: true,
+    get: function(date) {
       return date ? date.toISOString().split('T')[0] : null;
     }
   },
-  stock: { 
-    type: Number, 
-    required: true, 
+  stock: {
+    type: Number,
+    required: true,
     default: 0,
     validate: {
       validator: function(v) {
@@ -40,10 +41,10 @@ const ProductSchema = new mongoose.Schema({
       message: props => `${props.value} is not a valid quantity. Stock must be a non-negative integer`
     }
   },
-  status: { 
-    type: String, 
-    enum: ["active", "inactive"], 
-    default: "active" 
+  status: {
+    type: String,
+    enum: ["active", "inactive"],
+    default: "active"
   }
 });
 
@@ -61,7 +62,7 @@ ProductSchema.methods.decrementStock = function(quantity) {
 };
 
 ProductSchema.methods.getFormattedPrice = function() {
-  return `$${this.price.toLocaleString('es-CO')}`;
+  return `$${this.price.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 ProductSchema.virtual('formattedPrice').get(function() {

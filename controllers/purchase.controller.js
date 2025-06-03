@@ -4,21 +4,98 @@ import Product from "../models/product.js";
 import Provider from "../models/provider.js";
 import { checkPermission } from "../utils/permissions.js";
 
-async function generatePurchaseId() {
-    const lastPurchase = await Purchase.findOne().sort({ createdAt: -1 });
-    if (!lastPurchase || !/^Pu\d{2}$/.test(lastPurchase.id)) {
-        return "Pu01";
-    }
+// ===== FUNCIONES HELPER PARA FECHAS =====
 
-    const lastNumber = parseInt(lastPurchase.id.substring(2), 10);
-    const nextNumber = (lastNumber + 1).toString().padStart(2, "0");
-    return `Pu${nextNumber}`;
+/**
+ * Convierte una fecha a formato YYYY-MM-DD respetando la zona horaria local
+ * @param {Date|string} date - Fecha a convertir
+ * @returns {string} Fecha en formato YYYY-MM-DD
+ */
+function formatLocalDate(date = new Date()) {
+    const dateObj = date instanceof Date ? date : new Date(date);
+    
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Convierte fecha de string YYYY-MM-DD a objeto Date (zona local)
+ * @param {string} dateString
+ * @returns {Date}
+ */
+function parseLocalDate(dateString) {
+    if (!dateString) return new Date();
+    
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day);
+    }
+    
+    return new Date(dateString);
+}
+
+async function generatePurchaseId() {
+    try {
+        const lastPurchase = await Purchase.findOne()
+            .sort({ id: -1 })
+            .select('id');
+            
+        if (!lastPurchase || !lastPurchase.id || !/^Pu\d{2}$/.test(lastPurchase.id)) {
+            const existingPu01 = await Purchase.findOne({ id: "Pu01" });
+            if (existingPu01) {
+                return await findNextAvailableId();
+            }
+            return "Pu01";
+        }
+
+        const lastNumber = parseInt(lastPurchase.id.substring(2), 10);
+        let nextNumber = lastNumber + 1;
+        let attempts = 0;
+        const maxAttempts = 100;
+        
+        while (attempts < maxAttempts) {
+            const candidateId = `Pu${String(nextNumber).padStart(2, "0")}`;
+            
+            const existing = await Purchase.findOne({ id: candidateId });
+            
+            if (!existing) {
+                return candidateId;
+            }
+            
+            nextNumber++;
+            attempts++;
+        }
+        
+        const timestamp = Date.now().toString().slice(-4);
+        return `Pu${timestamp}`;
+        
+    } catch (error) {
+        const emergencyId = `Pu${Date.now().toString().slice(-4)}`;
+        return emergencyId;
+    }
+}
+
+async function findNextAvailableId() {
+    for (let i = 1; i <= 99; i++) {
+        const candidateId = `Pu${String(i).padStart(2, "0")}`;
+        const existing = await Purchase.findOne({ id: candidateId });
+        
+        if (!existing) {
+            return candidateId;
+        }
+    }
+    
+    // Si todos los números del 01 al 99 están ocupados
+    const timestamp = Date.now().toString().slice(-4);
+    return `Pu${timestamp}`;
 }
 
 function validatePurchaseData(data) {
     const errors = [];
     
-    // Validaciones obligatorias para creación
     if (!data.products || !Array.isArray(data.products) || data.products.length === 0) {
         errors.push("At least one product is required");
     }
@@ -52,24 +129,22 @@ function validatePurchaseData(data) {
     return errors;
 }
 
-// GET: Retrieve all purchases
+// Retrieve all purchases
 export const getPurchases = async (req, res) => {
     try {        
         if (!req.user || !checkPermission(req.user.role, "view_purchases")) {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        console.log("Executing purchase query");
         const purchases = await Purchase.find()
             .populate("provider", "company")
             .populate("products.product", "name price");
-        console.log(`Found ${purchases.length} purchases`);
 
         const formattedPurchases = purchases.map(purchase => {
             const purchaseObj = purchase.toObject();
             
             if (purchaseObj.purchase_date) {
-                purchaseObj.purchase_date = new Date(purchaseObj.purchase_date).toISOString().split('T')[0];
+                purchaseObj.purchase_date = formatLocalDate(purchaseObj.purchase_date);
             }
             
             if (purchaseObj.products && Array.isArray(purchaseObj.products)) {
@@ -86,12 +161,11 @@ export const getPurchases = async (req, res) => {
 
         res.status(200).json(formattedPurchases);
     } catch (error) {
-        console.error("Error fetching purchases:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// GET: Retrieve a single purchase by ID
+// Retrieve a single purchase by ID
 export const getPurchaseById = async (req, res) => {
     try {
         if (!req.user || !checkPermission(req.user.role, "view_purchases_id")) {
@@ -115,7 +189,7 @@ export const getPurchaseById = async (req, res) => {
         const formattedPurchase = purchase.toObject();
         
         if (formattedPurchase.purchase_date) {
-            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
         }
         
         if (formattedPurchase.products && Array.isArray(formattedPurchase.products)) {
@@ -129,12 +203,11 @@ export const getPurchaseById = async (req, res) => {
 
         res.status(200).json(formattedPurchase);
     } catch (error) {
-        console.error("Error fetching purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// POST: Create new purchase
+// Create new purchase
 export const postPurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "create_purchases")) {
@@ -151,6 +224,10 @@ export const postPurchase = async (req, res) => {
         const existingProvider = await Provider.findById(provider);
         if (!existingProvider) {
             return res.status(404).json({ message: "Provider not found" });
+        }
+
+        if (existingProvider.status !== "active") {
+            return res.status(400).json({ message: "Cannot use inactive provider" });
         }
 
         let total = 0;
@@ -178,17 +255,18 @@ export const postPurchase = async (req, res) => {
             });
             
             total += itemTotal;
-
             await foundProduct.incrementStock(item.quantity);
         }
 
-        const id = await generatePurchaseId();
+        const purchaseId = await generatePurchaseId();
+
+        const purchaseDate = purchase_date ? parseLocalDate(purchase_date) : new Date();
 
         const newPurchase = new Purchase({
-            id,
+            id: purchaseId,
             provider,
             products: validatedProducts,
-            purchase_date: purchase_date || new Date(),
+            purchase_date: purchaseDate,
             total
         });
 
@@ -197,20 +275,29 @@ export const postPurchase = async (req, res) => {
         const formattedPurchase = newPurchase.toObject();
         
         if (formattedPurchase.purchase_date) {
-            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
         }
 
         res.status(201).json({ 
             message: "Purchase created successfully and product stock updated", 
             purchase: formattedPurchase 
         });
+        
     } catch (error) {
-        console.error("Error creating purchase:", error);
-        res.status(500).json({ message: "Server error", details: error.message });
+        if (error.code === 11000 && error.keyPattern?.id) {
+            return res.status(409).json({ 
+                message: "Purchase ID conflict, please try again"
+            });
+        }
+        
+        res.status(500).json({ 
+            message: "Server error", 
+            details: error.message 
+        });
     }
 };
 
-// UPDATE: Deactivate purchase (with reason)
+// Deactivate purchase (with reason)
 export const deactivatePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "update_status_purchases")) {
@@ -224,7 +311,6 @@ export const deactivatePurchase = async (req, res) => {
             return res.status(400).json({ message: "Invalid purchase ID format" });
         }
 
-        // Validar que se proporcione un motivo
         if (!reason || reason.trim().length === 0) {
             return res.status(400).json({ 
                 message: "Deactivation reason is required" 
@@ -243,7 +329,6 @@ export const deactivatePurchase = async (req, res) => {
             });
         }
 
-        // Verificar que hay suficiente stock para revertir
         for (const item of purchase.products) {
             const product = await Product.findById(item.product);
             if (product) {
@@ -257,7 +342,6 @@ export const deactivatePurchase = async (req, res) => {
             }
         }
 
-        // Revertir el stock
         for (const item of purchase.products) {
             const product = await Product.findById(item.product);
             if (product) {
@@ -281,7 +365,7 @@ export const deactivatePurchase = async (req, res) => {
         const formattedPurchase = updatedPurchase.toObject();
         
         if (formattedPurchase.purchase_date) {
-            formattedPurchase.purchase_date = new Date(formattedPurchase.purchase_date).toISOString().split('T')[0];
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
         }
 
         res.status(200).json({ 
@@ -289,12 +373,11 @@ export const deactivatePurchase = async (req, res) => {
             purchase: formattedPurchase 
         });
     } catch (error) {
-        console.error("Error deactivating purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
-// DELETE: Remove a purchase by ID (solo si está inactiva)
+// Remove a purchase by ID (solo si está inactiva)
 export const deletePurchase = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "delete_purchases")) {
@@ -323,7 +406,6 @@ export const deletePurchase = async (req, res) => {
 
         res.status(200).json({ message: "Purchase deleted successfully" });
     } catch (error) {
-        console.error("Error deleting purchase:", error);
         res.status(500).json({ message: "Server error", details: error.message });
     }
 };

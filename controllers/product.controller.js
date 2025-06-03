@@ -15,7 +15,37 @@ async function generateProductId() {
     return `Pr${nextNumber}`;
 }
 
-// Función para verificar si un producto está activo y disponible para venta
+function calculateDaysUntilExpiration(expirationDate) {
+    if (!expirationDate) return null;
+    
+    const currentDate = new Date();
+    const expiration = new Date(expirationDate);
+    
+    currentDate.setHours(0, 0, 0, 0);
+    expiration.setHours(0, 0, 0, 0);
+    
+    const timeDiff = expiration - currentDate;
+    return Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
+}
+
+function formatDateForResponse(date) {
+    if (!date) return null;
+    
+    // Verificar si ya es una instancia de Date
+    let dateObj;
+    if (date instanceof Date) {
+        dateObj = date;
+    } else {
+        // Intentar convertir a Date
+        dateObj = new Date(date);
+        if (isNaN(dateObj.getTime())) {
+            return null;
+        }
+    }
+    
+    return dateObj.toISOString();
+}
+
 export const validateProductForSale = async (productId) => {
     try {
         if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -61,82 +91,62 @@ export const validateProductForSale = async (productId) => {
     }
 };
 
-// Función para verificar productos próximos a vencer
-export const checkExpiringProducts = async (daysBeforeExpiration = 7) => {
-    try {
-        const currentDate = new Date();
-        const alertDate = new Date();
-        alertDate.setDate(currentDate.getDate() + daysBeforeExpiration);
-
-        const expiringProducts = await Product.find({
-            status: "active",
-            expirationDate: {
-                $gte: currentDate,
-                $lte: alertDate
-            }
-        })
-        .select("id name expirationDate stock category")
-        .populate("category", "name");
-
-        return expiringProducts.map(product => ({
-            id: product.id,
-            name: product.name,
-            expirationDate: product.expirationDate,
-            stock: product.stock,
-            category: product.category?.name,
-            daysUntilExpiration: Math.ceil((product.expirationDate - currentDate) / (1000 * 60 * 60 * 24))
-        }));
-    } catch (error) {
-        console.error("Error checking expiring products:", error);
-        return [];
-    }
-};
-
-// Función para obtener notificaciones de productos próximos a vencer
-export const getExpirationNotifications = async (req, res) => {
-    try {
-        if (!checkPermission(req.user.role, "view_products")) {
-            return res.status(403).json({ message: "Unauthorized access" });
-        }
-
-        const daysBeforeExpiration = req.query.days ? parseInt(req.query.days) : 7;
-        const expiringProducts = await checkExpiringProducts(daysBeforeExpiration);
-
-        res.status(200).json({
-            message: `Productos próximos a vencer en los próximos ${daysBeforeExpiration} días`,
-            count: expiringProducts.length,
-            products: expiringProducts
-        });
-    } catch (error) {
-        console.error("Error getting expiration notifications:", error);
-        res.status(500).json({ message: "Server error" });
-    }
-};
-
 // Get all products
 export const getProducts = async (req, res) => {
     try {
+        console.log("🔍 getProducts iniciado");
+        console.log("Usuario:", req.user);
+        
         if (!checkPermission(req.user.role, "view_products")) {
+            console.log("❌ Sin permisos para ver productos");
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
+        console.log("🔍 Consultando productos en BD...");
         const products = await Product.find()
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        // Verificar productos próximos a vencer
-        const expiringProducts = await checkExpiringProducts();
-        
-        res.status(200).json({
-            products,
-            expiringProductsAlert: expiringProducts.length > 0 ? {
-                message: `Tienes ${expiringProducts.length} producto(s) próximo(s) a vencer`,
-                count: expiringProducts.length
-            } : null
+        console.log("✅ Productos encontrados:", products.length);
+
+        const productsWithDays = products.map(product => {
+            const productObj = product.toObject();
+            productObj.daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
+            return productObj;
         });
+
+        // Calcular productos próximos a vencer (opcional, sin función externa)
+        const currentDate = new Date();
+        const sevenDaysFromNow = new Date();
+        sevenDaysFromNow.setDate(currentDate.getDate() + 7);
+
+        const expiringProducts = products.filter(product => {
+            if (!product.expirationDate) return false;
+            const expDate = new Date(product.expirationDate);
+            return expDate >= currentDate && expDate <= sevenDaysFromNow && product.status === "active";
+        });
+        
+        const response = {
+            products: productsWithDays
+        };
+
+        // Agregar alerta solo si hay productos próximos a vencer
+        if (expiringProducts.length > 0) {
+            response.expiringProductsAlert = {
+                message: `Tienes ${expiringProducts.length} producto(s) próximo(s) a vencer en 1 semana`,
+                count: expiringProducts.length
+            };
+        }
+
+        console.log("✅ Respuesta enviada exitosamente");
+        res.status(200).json(response);
     } catch (error) {
-        console.error("Error fetching products:", error);
-        res.status(500).json({ message: "Server error" });
+        console.error("❌ Error completo en getProducts:", error);
+        console.error("Stack trace:", error.stack);
+        res.status(500).json({ 
+            message: "Server error", 
+            details: error.message 
+        });
     }
 };
 
@@ -161,12 +171,11 @@ export const getProductById = async (req, res) => {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        // Verificar si el producto está próximo a vencer
-        const currentDate = new Date();
-        const daysUntilExpiration = Math.ceil((product.expirationDate - currentDate) / (1000 * 60 * 60 * 24));
+        const daysUntilExpiration = calculateDaysUntilExpiration(product.expirationDate);
         
         const response = {
             ...product.toObject(),
+            daysUntilExpiration: daysUntilExpiration,
             expirationAlert: daysUntilExpiration <= 7 && daysUntilExpiration > 0 ? {
                 message: `Este producto vence en ${daysUntilExpiration} día(s)`,
                 daysUntilExpiration
@@ -176,7 +185,7 @@ export const getProductById = async (req, res) => {
         res.status(200).json(response);
     } catch (error) {
         console.error("Error fetching product:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error", details: error.message });
     }
 };
 
@@ -230,9 +239,7 @@ export const postProduct = async (req, res) => {
             return res.status(400).json({ message: "Expiration date must be after batch date" });
         }
 
-        // Verificar si el producto se está creando próximo a la fecha de vencimiento
-        const currentDate = new Date();
-        const daysUntilExpiration = Math.ceil((expirationDateObj - currentDate) / (1000 * 60 * 60 * 24));
+        const daysUntilExpiration = calculateDaysUntilExpiration(expirationDateObj);
         
         const id = await generateProductId();
         const newProduct = new Product({
@@ -251,13 +258,17 @@ export const postProduct = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
         
+        const productResponse = {
+            ...savedProduct.toObject(),
+            daysUntilExpiration: daysUntilExpiration
+        };
+        
         const response = { 
             message: "Product created successfully. Stock starts at 0 and will increase with purchases.", 
-            product: savedProduct 
+            product: productResponse
         };
 
-        // Agregar alerta si el producto vence pronto
-        if (daysUntilExpiration <= 30 && daysUntilExpiration > 0) {
+        if (daysUntilExpiration <= 7 && daysUntilExpiration > 0) {
             response.expirationAlert = {
                 message: `Advertencia: Este producto vence en ${daysUntilExpiration} día(s)`,
                 daysUntilExpiration
@@ -358,13 +369,16 @@ export const updateProduct = async (req, res) => {
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
-        // Verificar si el producto actualizado está próximo a vencer
-        const currentDate = new Date();
-        const daysUntilExpiration = Math.ceil((updatedProduct.expirationDate - currentDate) / (1000 * 60 * 60 * 24));
+        const daysUntilExpiration = calculateDaysUntilExpiration(updatedProduct.expirationDate);
+        
+        const productResponse = {
+            ...updatedProduct.toObject(),
+            daysUntilExpiration: daysUntilExpiration
+        };
         
         const response = { 
             message: "Product updated successfully", 
-            product: updatedProduct 
+            product: productResponse
         };
 
         if (daysUntilExpiration <= 7 && daysUntilExpiration > 0) {
@@ -399,24 +413,37 @@ export const updateProductStatus = async (req, res) => {
             return res.status(400).json({ message: "Status must be 'active' or 'inactive'" });
         }
 
+        const existingProduct = await Product.findById(id);
+        if (!existingProduct) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
         const updatedProduct = await Product.findByIdAndUpdate(
             id,
             { status },
-            { new: true, runValidators: true }
+            { 
+                new: true, 
+                runValidators: true,
+                useFindAndModify: false 
+            }
         )
             .select("id name price stock status category batchDate expirationDate formattedPrice")
             .populate("category", "name");
 
         if (!updatedProduct) {
-            return res.status(404).json({ message: "Product not found" });
+            return res.status(404).json({ message: "Product not found after update" });
         }
+
+        const productResponse = {
+            ...updatedProduct.toObject(),
+            daysUntilExpiration: calculateDaysUntilExpiration(updatedProduct.expirationDate)
+        };
 
         const response = { 
             message: `Product ${status === 'active' ? 'activated' : 'deactivated'} successfully`, 
-            product: updatedProduct 
+            product: productResponse
         };
 
-        // Agregar advertencia si se está desactivando un producto
         if (status === 'inactive') {
             response.warning = "El producto ha sido desactivado y no podrá ser vendido hasta que se reactive";
         }
@@ -424,7 +451,10 @@ export const updateProductStatus = async (req, res) => {
         res.status(200).json(response);
     } catch (error) {
         console.error("Error updating product status:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message
+        });
     }
 };
 

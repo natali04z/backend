@@ -1,7 +1,7 @@
 import Role from "../models/role.js";
 import Permission from "../models/permission.js";
 import mongoose from "mongoose";
-import { getDefaultPermissions, ALL_PERMISSIONS } from "../utils/permissions.js";
+import { getDefaultPermissions, ALL_PERMISSIONS, checkPermission } from "../utils/permissions.js";
 
 // Función para generar ID de rol (Ro01, Ro02, etc.)
 async function generateRoleId() {
@@ -145,7 +145,7 @@ export const updateRole = async (req, res) => {
       return res.status(404).json({ message: "Role not found" });
     }
     
-    // No permitir modificar el rol de administrador en absoluto
+    // ✅ VALIDACIÓN: No permitir modificar el rol de administrador
     if (role.name === "admin") {
       return res.status(403).json({ message: "Admin role cannot be modified" });
     }
@@ -231,7 +231,7 @@ export const toggleRoleStatus = async (req, res) => {
       return res.status(404).json({ message: "Role not found" });
     }
     
-    // No permitir cambiar el estado del rol de administrador
+    // ✅ VALIDACIÓN: No permitir cambiar el estado del rol de administrador
     if (role.name === "admin") {
       return res.status(403).json({ message: "Admin role status cannot be modified" });
     }
@@ -275,8 +275,8 @@ export const deleteRole = async (req, res) => {
       return res.status(404).json({ message: "Role not found" });
     }
     
-    // No permitir eliminar roles predeterminados
-    if (role.isDefault) {
+    // ✅ VALIDACIÓN: No permitir eliminar roles predeterminados (admin, assistant, employee)
+    if (role.isDefault || ["admin", "assistant", "employee"].includes(role.name)) {
       return res.status(400).json({ message: "Cannot delete default roles" });
     }
     

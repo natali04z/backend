@@ -3,30 +3,120 @@ import Role from "../models/role.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
-// Registrar usuario
+// Función auxiliar para validar teléfono
+function validatePhone(phone) {
+    if (!phone) return { isValid: false, message: "Contact phone is required" };
+    
+    if (!/^\d+$/.test(phone)) {
+        return { isValid: false, message: "Contact phone must contain only digits" };
+    }
+    
+    if (phone.length < 10) {
+        return { isValid: false, message: "Contact phone must be at least 10 digits" };
+    }
+    
+    return { isValid: true };
+}
+
+// Función auxiliar para validar email
+function validateEmail(email) {
+    if (!email) return { isValid: false, message: "Email is required" };
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return { isValid: false, message: "Invalid email format" };
+    }
+    
+    return { isValid: true };
+}
+
+// Mapeo de roles para mostrar en español
+const roleTranslations = {
+    "admin": "Administrador",
+    "assistant": "Asistente", 
+    "employee": "Empleado"
+};
+
+// Register user
 export const registerUser = async (req, res) => {
     try {
         const { name, lastname, contact_number, email, password, role } = req.body;
 
+        // Validaciones básicas de campos requeridos
         if (!name || !lastname || !contact_number || !email || !password || !role) {
-            return res.status(400).json({ message: "All fields are required" });
+            return res.status(400).json({ 
+                success: false,
+                message: "All fields are required (name, lastname, contact_number, email, password, role)" 
+            });
         }
 
-        if (!/^\d+$/.test(contact_number)) {
-            return res.status(400).json({ message: "Phone number must contain only digits" });
+        // Validación de longitud de contraseña
+        if (password.length < 6 || password.length > 12) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be between 6 and 12 characters long",
+                field: "password"
+            });
         }
 
-        const existingUser = await User.findOne({ email });
+        // Validar teléfono usando la función auxiliar
+        const phoneValidation = validatePhone(contact_number.toString().trim());
+        if (!phoneValidation.isValid) {
+            return res.status(400).json({ 
+                success: false,
+                message: phoneValidation.message,
+                field: "contact_number"
+            });
+        }
+
+        // Validar email
+        const emailValidation = validateEmail(email.toString().trim());
+        if (!emailValidation.isValid) {
+            return res.status(400).json({ 
+                success: false,
+                message: emailValidation.message,
+                field: "email"
+            });
+        }
+
+        // Validar nombre
+        const trimmedName = name.toString().trim();
+        if (trimmedName.length < 2 || trimmedName.length > 50) {
+            return res.status(400).json({ 
+                success: false,
+                message: "Name must be between 2 and 50 characters",
+                field: "name"
+            });
+        }
+
+        // Validar apellido
+        const trimmedLastname = lastname.toString().trim();
+        if (trimmedLastname.length < 2 || trimmedLastname.length > 50) {
+            return res.status(400).json({ 
+                success: false,
+                message: "Lastname must be between 2 and 50 characters",
+                field: "lastname"
+            });
+        }
+
+        // Verificar si el email ya existe
+        const existingUser = await User.findOne({ email: email.toString().trim().toLowerCase() });
         if (existingUser) {
-            return res.status(400).json({ message: "Email already in use" });
+            return res.status(400).json({ 
+                success: false,
+                message: "A user with this email already exists",
+                field: "email"
+            });
         }
 
         let roleDoc = null;
         
+        // Buscar rol por ID, name o identificador
         if (!roleDoc) {
             try {
                 roleDoc = await Role.findById(role);
             } catch (err) {
+                // ID inválido, continuar con otras búsquedas
             }
         }
         
@@ -39,29 +129,27 @@ export const registerUser = async (req, res) => {
         }
 
         if (!roleDoc) {
-            return res.status(400).json({ message: "Invalid role name" });
+            return res.status(400).json({ 
+                success: false,
+                message: "Invalid role identifier",
+                field: "role"
+            });
         }
 
+        // Encriptar contraseña
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const newUser = new User({
-            name,
-            lastname,
-            contact_number,
-            email,
+            name: trimmedName,
+            lastname: trimmedLastname,
+            contact_number: contact_number.toString().trim(),
+            email: email.toString().trim().toLowerCase(),
             password: hashedPassword,
             role: roleDoc._id
         });
 
         await newUser.save();
-
         await newUser.populate("role", "id name");
-
-        const roleTranslations = {
-            "admin": "Administrador",
-            "assistant": "Asistente", 
-            "employee": "Empleado"
-        };
 
         const userResponse = {
             name: newUser.name,
@@ -83,13 +171,37 @@ export const registerUser = async (req, res) => {
         );
 
         res.status(201).json({
+            success: true,
             message: "User registered successfully",
             token,
-            user: userResponse
+            data: userResponse
         });
 
     } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        console.error("Error creating user:", error);
+        
+        // Manejar errores específicos de MongoDB
+        if (error.name === 'ValidationError') {
+            const validationErrors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({ 
+                success: false,
+                message: "Validation error: " + validationErrors.join(', ') 
+            });
+        }
+        
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern)[0];
+            return res.status(400).json({ 
+                success: false,
+                message: `A user with this ${field} already exists`,
+                field: field
+            });
+        }
+        
+        res.status(500).json({ 
+            success: false,
+            message: "Error creating user. Please try again later." 
+        });
     }
 };
 
@@ -113,14 +225,14 @@ export const loginUser = async (req, res) => {
             });
         }
         
-        // NUEVO: Verificar si el rol existe y está activo
+        // Verificar si el rol existe y está activo
         if (!user.role) {
             return res.status(403).json({ 
                 message: "Your account has no role assigned. Please contact an administrator." 
             });
         }
         
-        // NUEVO: Verificar el estado del rol
+        // Verificar el estado del rol
         if (user.role.status === 'inactive') {
             return res.status(403).json({ 
                 message: "Access denied. Your role is currently inactive. Please contact an administrator." 
@@ -200,6 +312,13 @@ export const resetPassword = async (req, res) => {
 
         if (!email || !newPassword) {
             return res.status(400).json({ message: "Email and new password are required" });
+        }
+
+        // Validación de longitud de contraseña
+        if (newPassword.length < 6 || newPassword.length > 12) {
+            return res.status(400).json({ 
+                message: "Password must be between 6 and 12 characters long" 
+            });
         }
 
         // Buscar al usuario nuevamente

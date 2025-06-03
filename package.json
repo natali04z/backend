@@ -16,13 +16,11 @@
     "crypto": "^1.0.1",
     "dotenv": "^16.4.7",
     "ex": "^0.1.4",
-    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "icesoft_backend": "file:",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",
-    "nodemailer": "^6.10.1",
-    "pdfkit": "^0.17.0"
+    "nodemailer": "^7.0.3"
   },
   "type": "module"
 }

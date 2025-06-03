@@ -2,7 +2,7 @@ import { validateProductForSale } from "../controllers/product.controller.js";
 
 export const validateProductsForSale = async (req, res, next) => {
     try {
-        const { products } = req.body; // Asumiendo que los productos vienen en el body
+        const { products } = req.body;
         
         if (!products || !Array.isArray(products)) {
             return res.status(400).json({ 
@@ -15,23 +15,24 @@ export const validateProductsForSale = async (req, res, next) => {
 
         // Validar cada producto
         for (const item of products) {
-            const validation = await validateProductForSale(item.productId);
+            // CAMBIO: usar item.product en lugar de item.productId
+            const validation = await validateProductForSale(item.product);
             
             if (!validation.isValid) {
                 invalidProducts.push({
-                    productId: item.productId,
+                    productId: item.product, // CAMBIO: usar item.product
                     error: validation.message
                 });
             } else {
                 // Verificar que hay suficiente stock
                 if (validation.product.stock < item.quantity) {
                     invalidProducts.push({
-                        productId: item.productId,
+                        productId: item.product, // CAMBIO: usar item.product
                         error: `Stock insuficiente. Disponible: ${validation.product.stock}, Solicitado: ${item.quantity}`
                     });
                 } else {
                     validationResults.push({
-                        productId: item.productId,
+                        productId: item.product, // CAMBIO: usar item.product
                         product: validation.product,
                         quantity: item.quantity
                     });
@@ -42,9 +43,8 @@ export const validateProductsForSale = async (req, res, next) => {
         // Si hay productos inválidos, retornar error
         if (invalidProducts.length > 0) {
             return res.status(400).json({
-                message: "No se puede procesar la venta debido a productos inválidos",
-                invalidProducts: invalidProducts,
-                details: "Verifica que todos los productos estén activos y tengan stock suficiente"
+                message: "Verifica que todos los productos estén activos y tengan stock suficiente",
+                invalidProducts: invalidProducts
             });
         }
 
@@ -60,24 +60,7 @@ export const validateProductsForSale = async (req, res, next) => {
     }
 };
 
-// Ejemplo de cómo usar en tu controller de ventas
-export const processSale = async (req, res) => {
-    try {
-        // Los productos ya están validados por el middleware
-        const validatedProducts = req.validatedProducts;
-        
-        res.status(200).json({
-            message: "Venta procesada exitosamente",
-            products: validatedProducts
-        });
-        
-    } catch (error) {
-        console.error("Error processing sale:", error);
-        res.status(500).json({ message: "Error procesando la venta" });
-    }
-};
-
-// También puedes crear un endpoint específico para verificar un producto antes de venta
+// También corregir el endpoint de verificación individual
 export const checkProductAvailability = async (req, res) => {
     try {
         const { productId } = req.params;

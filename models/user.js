@@ -11,7 +11,10 @@ const userSchema = new mongoose.Schema({
       type: String, 
       unique: true 
     },
-    password: String,
+    password: {
+      type: String,
+      required: true
+    },
     role: { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: "Role"
@@ -23,6 +26,6 @@ const userSchema = new mongoose.Schema({
     },
     resetPasswordToken: String,
     resetPasswordExpires: Date
-  });
+});
 
 export default mongoose.model("User", userSchema);
