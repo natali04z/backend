@@ -271,7 +271,7 @@ export const deleteRole = async (req, res) => {
     // Encontrar el rol
     const role = await Role.findById(id);
     
-    if (!role) {
+    if (!role) {3
       return res.status(404).json({ message: "Role not found" });
     }
     
