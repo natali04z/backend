@@ -71,7 +71,7 @@ const SaleSchema = new mongoose.Schema({
         enum: ["processing", "completed", "cancelled"],
         default: "processing"
     }
-}, { timestamps: true });
+});
 
 // Pre-save middleware para calcular el total
 SaleSchema.pre('save', function() {
