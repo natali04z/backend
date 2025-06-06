@@ -4,7 +4,7 @@ import Product from "../models/product.js";
 import Branch from "../models/branches.js";
 
 // Crear una nueva venta
-export const createSale = async (req, res) => {
+export const postSale = async (req, res) => {
     try {
         const { id, customer, branch, products, status } = req.body;
 
@@ -85,7 +85,7 @@ export const createSale = async (req, res) => {
 };
 
 // Obtener todas las ventas
-export const getAllSales = async (req, res) => {
+export const getSales = async (req, res) => {
     try {
         const { page = 1, limit = 10, status, branch, customer, startDate, endDate } = req.query;
         
