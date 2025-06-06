@@ -201,7 +201,7 @@ export const getSales = async (req, res) => {
 
         const sales = await Sale.find()
             .populate("customer", "name lastname email phone")
-            .populate("branch", "id name location")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price")
             .sort({ createdAt: -1 });
 
@@ -246,7 +246,7 @@ export const getSaleById = async (req, res) => {
 
         const sale = await Sale.findById(id)
             .populate("customer", "name lastname email phone")
-            .populate("branch", "id name location")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price");
 
         if (!sale) {
@@ -348,7 +348,7 @@ export const postSale = async (req, res) => {
 
         const createdSale = await Sale.findById(newSale._id)
             .populate("customer", "name lastname email phone")
-            .populate("branch", "id name location")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price");
 
         const formattedSale = createdSale.toObject();
@@ -470,7 +470,7 @@ export const updateSaleStatus = async (req, res) => {
             { new: true, runValidators: true }
         )
             .populate("customer", "name lastname email phone")
-            .populate("branch", "id name location")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price");
 
         const formattedSale = updatedSale.toObject();
