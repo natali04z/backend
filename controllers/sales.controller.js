@@ -1,7 +1,7 @@
 import Sale from "../models/Sale.js";
-import Customer from "../models/Customer.js";
-import Product from "../models/Product.js";
-import Branch from "../models/Branch.js";
+import Customer from "../models/customer.js";
+import Product from "../models/product.js";
+import Branch from "../models/branches.js";
 
 // Crear una nueva venta
 export const createSale = async (req, res) => {
