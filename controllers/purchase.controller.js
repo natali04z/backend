@@ -377,6 +377,92 @@ export const deactivatePurchase = async (req, res) => {
     }
 };
 
+// Reactivate purchase (with reason)
+export const reactivatePurchase = async (req, res) => {
+    try {
+        if (!checkPermission(req.user.role, "reactivate_purchases")) {
+            return res.status(403).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid purchase ID format" });
+        }
+
+        if (!reason || reason.trim().length === 0) {
+            return res.status(400).json({ 
+                message: "Reactivation reason is required" 
+            });
+        }
+
+        const purchase = await Purchase.findById(id);
+        
+        if (!purchase) {
+            return res.status(404).json({ message: "Purchase not found" });
+        }
+
+        if (purchase.status !== "inactive") {
+            return res.status(400).json({ 
+                message: "Purchase is already active" 
+            });
+        }
+
+        // Verificar que el proveedor esté activo
+        const provider = await Provider.findById(purchase.provider);
+        if (!provider || provider.status !== "active") {
+            return res.status(400).json({
+                message: "Cannot reactivate purchase. Provider is inactive or not found"
+            });
+        }
+
+        // Verificar que todos los productos estén activos
+        for (const item of purchase.products) {
+            const product = await Product.findById(item.product);
+            if (!product || product.status !== "active") {
+                return res.status(400).json({
+                    message: `Cannot reactivate purchase. Product is inactive or not found`
+                });
+            }
+        }
+
+        // Incrementar stock de productos
+        for (const item of purchase.products) {
+            const product = await Product.findById(item.product);
+            if (product) {
+                await product.incrementStock(item.quantity);
+            }
+        }
+
+        const updatedPurchase = await Purchase.findByIdAndUpdate(
+            id,
+            { 
+                status: "active",
+                reactivation_reason: reason.trim(),
+                reactivated_at: new Date(),
+                reactivated_by: req.user.id
+            },
+            { new: true, runValidators: true }
+        )
+            .populate("provider", "company")
+            .populate("products.product", "name price");
+
+        const formattedPurchase = updatedPurchase.toObject();
+        
+        if (formattedPurchase.purchase_date) {
+            formattedPurchase.purchase_date = formatLocalDate(formattedPurchase.purchase_date);
+        }
+
+        res.status(200).json({ 
+            message: "Purchase reactivated successfully and stock restored", 
+            purchase: formattedPurchase 
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Server error", details: error.message });
+    }
+};
+
 // Remove a purchase by ID (solo si está inactiva)
 export const deletePurchase = async (req, res) => {
     try {
