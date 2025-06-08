@@ -10,7 +10,6 @@ const ProductSchema = new mongoose.Schema({
     min: [0, 'Price cannot be negative'],
     validate: {
       validator: function(v) {
-        // CAMBIO: Permitir decimales, no solo enteros
         return typeof v === 'number' && v >= 0;
       },
       message: props => `${props.value} is not a valid price. Price must be a positive number`

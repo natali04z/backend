@@ -52,7 +52,7 @@ CustomerSchema.statics.getDefaultCustomer = async function() {
       name: "Cliente",
       lastname: "Predeterminado",
       phone: "0000000000",
-      email: "predeterminado@sistema.local",
+      email: "cpredeterminado@sistema.local",
       isDefault: true,
       status: 'active'
     });
