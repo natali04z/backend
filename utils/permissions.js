@@ -22,7 +22,7 @@ export const ALL_PERMISSIONS = [
   "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases",
 
   // Branches
-  "view_branches", "create_branches", "update_branches", "delete_branches",
+  "view_branches", "create_branches", "update_branches", "delete_branches","update_status_branches","edit_branches",
 
   // Customers
   "view_customers", "view_customers_id", "create_customers", "update_customers", "delete_customers", "update_customers_status",
