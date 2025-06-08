@@ -19,7 +19,7 @@ export const ALL_PERMISSIONS = [
   "view_products", "view_products_id", "create_products", "edit_products", "delete_products", "update_status_products", "update_stock_products",
 
   // Purchases
-  "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases",
+  "view_purchases", "view_purchases_id", "create_purchases", "delete_purchases", "update_status_purchases",  "reactivate_purchases",
 
   // Branches
   "view_branches", "create_branches", "update_branches", "delete_branches","update_status_branches","edit_branches",

@@ -1,25 +1,30 @@
 import mongoose from "mongoose";
 
 const SaleSchema = new mongoose.Schema({
-    id: { 
-        type: String, 
-        unique: true, 
-        required: true, 
-        trim: true 
+    id: {
+        type: String,
+        unique: true,
+        required: true,
+        trim: true
     },
-    customer: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: "Customer", 
-        required: true 
+    customer: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Customer",
+        required: true
+    },
+    branch: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Branch",
+        required: true
     },
     products: [{
-        product: { 
-            type: mongoose.Schema.Types.ObjectId, 
-            ref: "Product", 
-            required: true 
+        product: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Product",
+            required: true
         },
-        quantity: { 
-            type: Number, 
+        quantity: {
+            type: Number,
             required: true,
             validate: {
                 validator: function(v) {
@@ -28,8 +33,8 @@ const SaleSchema = new mongoose.Schema({
                 message: props => `${props.value} is not a valid quantity. Quantity must be a positive integer`
             }
         },
-        sale_price: { 
-            type: Number, 
+        sale_price: {
+            type: Number,
             required: true,
             validate: {
                 validator: function(v) {
@@ -38,21 +43,21 @@ const SaleSchema = new mongoose.Schema({
                 message: props => `${props.value} is not a valid price. Price must be a non-negative integer`
             }
         },
-        total: { 
-            type: Number, 
-            required: true 
+        total: {
+            type: Number,
+            required: true
         }
     }],
-    salesDate: { 
-        type: Date, 
-        required: true, 
+    salesDate: {
+        type: Date,
+        required: true,
         default: Date.now,
-        get: function(date) { 
+        get: function(date) {
             return date ? date.toISOString().split('T')[0] : null;
         }
     },
-    total: { 
-        type: Number, 
+    total: {
+        type: Number,
         required: true,
         validate: {
             validator: function(v) {
@@ -61,12 +66,12 @@ const SaleSchema = new mongoose.Schema({
             message: props => `${props.value} is not a valid total. Total must be a non-negative integer`
         }
     },
-    status: { 
-        type: String, 
-        enum: ["processing", "completed", "cancelled"], 
-        default: "processing" 
+    status: {
+        type: String,
+        enum: ["processing", "completed", "cancelled"],
+        default: "processing"
     }
-}, { timestamps: true });
+});
 
 // Pre-save middleware para calcular el total
 SaleSchema.pre('save', function() {

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Sale from "../models/sales.js";
 import Product from "../models/product.js";
 import Customer from "../models/customer.js";
+import Branch from "../models/branches.js";
 import { checkPermission } from "../utils/permissions.js";
 
 // ===== FUNCIONES HELPER PARA FECHAS =====
@@ -105,10 +106,17 @@ function validateSaleData(data, isUpdate = false) {
         if (!data.customer) {
             errors.push("Customer is required");
         }
+        if (!data.branch) {
+            errors.push("Branch is required");
+        }
     }
     
     if (data.customer && !mongoose.Types.ObjectId.isValid(data.customer)) {
         errors.push("Invalid customer ID format");
+    }
+    
+    if (data.branch && !mongoose.Types.ObjectId.isValid(data.branch)) {
+        errors.push("Invalid branch ID format");
     }
     
     if (data.products && Array.isArray(data.products)) {
@@ -193,6 +201,7 @@ export const getSales = async (req, res) => {
 
         const sales = await Sale.find()
             .populate("customer", "name lastname email phone")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price")
             .sort({ createdAt: -1 });
 
@@ -237,6 +246,7 @@ export const getSaleById = async (req, res) => {
 
         const sale = await Sale.findById(id)
             .populate("customer", "name lastname email phone")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price");
 
         if (!sale) {
@@ -272,7 +282,7 @@ export const postSale = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { products, customer, salesDate } = req.body;
+        const { products, customer, branch, salesDate } = req.body;
 
         const validationErrors = validateSaleData(req.body);
         if (validationErrors.length > 0) {
@@ -290,6 +300,17 @@ export const postSale = async (req, res) => {
         if (existingCustomer.status !== "active") {
             return res.status(400).json({ 
                 message: "Cannot create sale for inactive customer" 
+            });
+        }
+
+        const existingBranch = await Branch.findById(branch);
+        if (!existingBranch) {
+            return res.status(404).json({ message: "Branch not found" });
+        }
+
+        if (existingBranch.status !== "active") {
+            return res.status(400).json({ 
+                message: "Cannot create sale for inactive branch" 
             });
         }
 
@@ -311,6 +332,7 @@ export const postSale = async (req, res) => {
         const newSale = new Sale({
             id: saleId,
             customer,
+            branch,
             products: validatedProducts.map(item => ({
                 product: item.product,
                 quantity: item.quantity,
@@ -326,6 +348,7 @@ export const postSale = async (req, res) => {
 
         const createdSale = await Sale.findById(newSale._id)
             .populate("customer", "name lastname email phone")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price");
 
         const formattedSale = createdSale.toObject();
@@ -447,6 +470,7 @@ export const updateSaleStatus = async (req, res) => {
             { new: true, runValidators: true }
         )
             .populate("customer", "name lastname email phone")
+            .populate("branch", "id name address")
             .populate("products.product", "id name price");
 
         const formattedSale = updatedSale.toObject();

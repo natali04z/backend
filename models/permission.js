@@ -59,6 +59,7 @@ permissionSchema.statics.getPermissionTranslation = function() {
     "Actualizar compras": "update_purchases",
     "Eliminar compras": "delete_purchases",
     "update_status_purchases": "Desactivar estado de compras",
+    "reactivate_purchases": "Reactivar estado de Compra",
 
     // Sucursales
     "Ver sucursales": "view_branches",
