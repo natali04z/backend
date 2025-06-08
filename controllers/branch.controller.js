@@ -66,10 +66,7 @@ function validateBranchData(data, isUpdate = false) {
     };
 }
 
-// Función auxiliar para verificar permisos (opcional si usas middleware)
 function checkPermission(userRole, permission) {
-    // Esta función ya no es necesaria si usas middleware de autorización
-    // Pero la mantengo por compatibilidad
     return true;
 }
 
@@ -127,7 +124,6 @@ export const postBranches = async (req, res) => {
         // Validate data
         const validation = validateBranchData(req.body);
         if (!validation.isValid) {
-            console.log("Validation errors:", validation.errors); // Debug log
             return res.status(400).json({ 
                 success: false,
                 message: "Validation errors",
@@ -178,10 +174,6 @@ export const postBranches = async (req, res) => {
 // Update a branch
 export const updateBranches = async (req, res) => {
     try {
-        console.log("Update request - ID:", req.params.id);
-        console.log("Update request - Body:", req.body);
-        
-        // Check if the branch exists using the custom id field
         const existingBranch = await Branch.findOne({ id: req.params.id });
         if (!existingBranch) {
             return res.status(404).json({ 
@@ -275,23 +267,15 @@ export const deleteBranches = async (req, res) => {
 // Update branch status - CORREGIDO para coincidir con el frontend
 export const updateBranchStatus = async (req, res) => {
     try {
-        console.log("=== UPDATE BRANCH STATUS ===");
-        console.log("ID:", req.params.id);
-        console.log("Body:", req.body);
-        console.log("User:", req.user); // Debug para ver el usuario autenticado
-
         const { id } = req.params;
         const { status } = req.body;
 
-        // Validar que el status sea válido
         if (!status || !["active", "inactive"].includes(status)) {
             return res.status(400).json({ 
                 success: false,
                 message: "Status must be 'active' or 'inactive'" 
             });
         }
-
-        // Buscar la sucursal usando el ID personalizado
         const existingBranch = await Branch.findOne({ id: id });
         if (!existingBranch) {
             return res.status(404).json({ 
@@ -300,34 +284,9 @@ export const updateBranchStatus = async (req, res) => {
             });
         }
 
-        // Si se está desactivando, verificar dependencias (opcional)
         if (status === 'inactive') {
-            // Aquí puedes agregar verificaciones adicionales
-            // Por ejemplo, verificar si hay empleados activos
-            console.log("Deactivating branch, checking dependencies...");
-            
-            // Ejemplo de verificación de dependencias (descomenta si tienes modelo Employee)
-            /*
-            try {
-                const Employee = mongoose.model('Employee');
-                const activeEmployeesCount = await Employee.countDocuments({
-                    branchId: id, // o branch: existingBranch._id, dependiendo de tu esquema
-                    status: 'active'
-                });
-                
-                if (activeEmployeesCount > 0) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Cannot deactivate this branch. It has ${activeEmployeesCount} active employees associated with it. Please deactivate or reassign these employees first.`
-                    });
-                }
-            } catch (employeeError) {
-                console.log("Employee model not found or error checking dependencies:", employeeError.message);
-            }
-            */
         }
 
-        // Actualizar el estado de la sucursal
         const updatedBranch = await Branch.findOneAndUpdate(
             { id: id },
             { status: status },

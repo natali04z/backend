@@ -3,7 +3,6 @@ import Permission from "../models/permission.js";
 import mongoose from "mongoose";
 import { getDefaultPermissions, ALL_PERMISSIONS, checkPermission } from "../utils/permissions.js";
 
-// Función para generar ID de rol (Ro01, Ro02, etc.)
 async function generateRoleId() {
   try {
     const lastRole = await Role.findOne().sort({ id: -1 });
@@ -17,11 +16,11 @@ async function generateRoleId() {
     return `Ro${nextNumber}`;
   } catch (error) {
     console.error("Error generating role ID:", error);
-    // En caso de error, generar un ID basado en timestamp como fallback
     return `Ro${new Date().getTime().toString().slice(-2)}`;
   }
 }
 
+// Obtener todos los roles
 export const getRoles = async (req, res) => {
   try {
     const roles = await Role.find().populate('permissions').select('id name permissions status isDefault');
@@ -33,6 +32,7 @@ export const getRoles = async (req, res) => {
   }
 };
 
+// Obtener un rol por ID
 export const getRoleById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -54,6 +54,7 @@ export const getRoleById = async (req, res) => {
   }
 };
 
+// Crear un nuevo rol
 export const postRole = async (req, res) => {
   try {
     const { name, permissions, description } = req.body;
@@ -64,25 +65,20 @@ export const postRole = async (req, res) => {
     
     const normalizedName = name.toLowerCase().trim();
     
-    // Verificar si ya existe un rol con este nombre
     const existingRole = await Role.findOne({ name: normalizedName });
     if (existingRole) {
       return res.status(400).json({ message: "Role already exists" });
     }
     
-    // Verificar si es un rol predefinido
     const defaultRoles = Role.getDefaultRoles ? Role.getDefaultRoles() : ["admin", "assistant", "employee"];
     const isDefault = defaultRoles.includes(normalizedName);
     
-    // Preparar los permisos para el rol
     let rolePermissions = [];
     
     if (isDefault) {
       try {
-        // Obtener códigos de permisos por defecto para este rol
         const defaultPermissionsCodes = getDefaultPermissions(normalizedName);
         
-        // Buscar los IDs de los permisos en la base de datos
         if (defaultPermissionsCodes && defaultPermissionsCodes.length > 0) {
           const foundPermissions = await Permission.find({
             code: { $in: defaultPermissionsCodes }
@@ -91,37 +87,32 @@ export const postRole = async (req, res) => {
         }
       } catch (permError) {
         console.error("Error getting default permissions:", permError);
-        // Continuar con un array vacío de permisos
       }
     } else if (permissions && Array.isArray(permissions)) {
-      // Verificar si los permisos recibidos son ObjectId válidos
       const validPermissions = permissions.filter(perm => 
         mongoose.Types.ObjectId.isValid(perm)
       );
       rolePermissions = validPermissions;
     }
     
-    // Generar ID único para el rol
     const roleId = await generateRoleId();
     
-    // Crear y guardar el nuevo rol
     const newRole = new Role({
-      id: roleId,               // ID único generado
-      name: normalizedName,     // Nombre normalizado
-      description: description || "", // Descripción opcional
-      isDefault,                // Indicador de rol predefinido
-      permissions: rolePermissions, // Permisos asignados
-      status: "active"          // Estado inicial activo
+      id: roleId,
+      name: normalizedName,
+      description: description || "",
+      isDefault,
+      permissions: rolePermissions,
+      status: "active"
     });
     
     await newRole.save();
     
-    // Poblar los permisos para la respuesta
     const savedRole = await Role.findById(newRole._id).populate('permissions');
     
     res.status(201).json({ 
       message: "Role created successfully",
-      role: savedRole || newRole // Devolver el rol con permisos poblados o el rol original
+      role: savedRole || newRole
     });
   } catch (error) {
     console.error("Error creating role:", error);
@@ -129,6 +120,7 @@ export const postRole = async (req, res) => {
   }
 };
 
+// Actualizar un rol
 export const updateRole = async (req, res) => {
   try {
     const { id } = req.params;
@@ -138,21 +130,17 @@ export const updateRole = async (req, res) => {
       return res.status(400).json({ message: "Invalid role ID format" });
     }
     
-    // Encontrar el rol
     const role = await Role.findById(id);
     
     if (!role) {
       return res.status(404).json({ message: "Role not found" });
     }
     
-    // ✅ VALIDACIÓN: No permitir modificar el rol de administrador
     if (role.name === "admin") {
       return res.status(403).json({ message: "Admin role cannot be modified" });
     }
     
-    // Actualizar permisos si se proporcionan
     if (permissions && Array.isArray(permissions)) {
-      // Verificar si los IDs de permisos son válidos
       const validPermissionIds = permissions.filter(perm => 
         mongoose.Types.ObjectId.isValid(perm)
       );
@@ -161,7 +149,6 @@ export const updateRole = async (req, res) => {
         return res.status(400).json({ message: "No valid permission IDs provided" });
       }
       
-      // Verificar si todos los permisos existen en la base de datos
       const permissionsExist = await Permission.find({
         _id: { $in: validPermissionIds }
       });
@@ -177,11 +164,9 @@ export const updateRole = async (req, res) => {
       role.permissions = validPermissionIds;
     }
     
-    // Actualizar el nombre si se proporciona y no es un rol predeterminado
     if (name && !role.isDefault) {
       const normalizedName = name.toLowerCase().trim();
       
-      // Verificar si ya existe otro rol con este nombre
       const existingRole = await Role.findOne({ name: normalizedName, _id: { $ne: id } });
       if (existingRole) {
         return res.status(400).json({ message: "Another role already exists with this name" });
@@ -190,19 +175,17 @@ export const updateRole = async (req, res) => {
       role.name = normalizedName;
     }
     
-    // Actualizar descripción si se proporciona
     if (description !== undefined) {
       role.description = description;
     }
     
     await role.save();
     
-    // Poblar los permisos para la respuesta
     const updatedRole = await Role.findById(id).populate('permissions');
     
     res.status(200).json({
       message: "Role updated successfully",
-      role: updatedRole || role // Usar el rol poblado o el rol original
+      role: updatedRole || role
     });
   } catch (error) {
     console.error("Error updating role:", error);
@@ -220,7 +203,6 @@ export const toggleRoleStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     
-    // Validar que el estado sea uno de los valores permitidos ("active" o "inactive")
     if (!status || !["active", "inactive"].includes(status)) {
       return res.status(400).json({ message: "Status must be either 'active' or 'inactive'" });
     }
@@ -231,12 +213,10 @@ export const toggleRoleStatus = async (req, res) => {
       return res.status(404).json({ message: "Role not found" });
     }
     
-    // ✅ VALIDACIÓN: No permitir cambiar el estado del rol de administrador
     if (role.name === "admin") {
       return res.status(403).json({ message: "Admin role status cannot be modified" });
     }
     
-    // Solo actualizar si el estado es diferente
     if (role.status !== status) {
       const updatedRole = await Role.findByIdAndUpdate(
         id,
@@ -246,7 +226,7 @@ export const toggleRoleStatus = async (req, res) => {
       
       return res.status(200).json({
         message: `Role ${status === "active" ? 'activated' : 'deactivated'} successfully`,
-        role: updatedRole || { ...role.toObject(), status } // Fallback por si falla el populate
+        role: updatedRole || { ...role.toObject(), status }
       });
     } else {
       return res.status(200).json({
@@ -271,7 +251,7 @@ export const deleteRole = async (req, res) => {
     // Encontrar el rol
     const role = await Role.findById(id);
     
-    if (!role) {3
+    if (!role) {
       return res.status(404).json({ message: "Role not found" });
     }
     
