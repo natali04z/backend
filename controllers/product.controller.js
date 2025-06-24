@@ -196,8 +196,16 @@ export const postProduct = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
-        const { name, category, price, batchDate, expirationDate } = req.body;
-        const initialStock = 0;
+        const { name, category, price, batchDate, expirationDate, stock } = req.body;
+        
+        // El stock inicial es opcional, por defecto 0
+        let initialStock = 0;
+        if (stock !== undefined) {
+            if (!Number.isInteger(stock) || stock < 0) {
+                return res.status(400).json({ message: "Stock must be a non-negative integer" });
+            }
+            initialStock = stock;
+        }
         
         if (!name || !category || price === undefined || !batchDate || !expirationDate) {
             return res.status(400).json({ message: "All fields are required" });
@@ -263,8 +271,15 @@ export const postProduct = async (req, res) => {
             daysUntilExpiration: daysUntilExpiration
         };
         
+        let message = "Product created successfully.";
+        if (initialStock > 0) {
+            message = `Product created successfully with initial stock of ${initialStock} units.`;
+        } else {
+            message = "Product created successfully. Stock starts at 0 and will increase with purchases.";
+        }
+        
         const response = { 
-            message: "Product created successfully. Stock starts at 0 and will increase with purchases.", 
+            message: message, 
             product: productResponse
         };
 
@@ -282,7 +297,8 @@ export const postProduct = async (req, res) => {
     }
 };
 
-// Update product
+
+
 export const updateProduct = async (req, res) => {
     try {
         if (!checkPermission(req.user.role, "edit_products")) {
@@ -290,7 +306,7 @@ export const updateProduct = async (req, res) => {
         }
 
         const { id } = req.params;
-        const { name, category, price, batchDate, expirationDate } = req.body;
+        const { name, category, price, batchDate, expirationDate, stock } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid product ID" });
@@ -328,6 +344,13 @@ export const updateProduct = async (req, res) => {
                 return res.status(400).json({ message: "Price must be an integer" });
             }
         }
+
+        // Validar stock si se proporciona
+        if (stock !== undefined) {
+            if (!Number.isInteger(stock) || stock < 0) {
+                return res.status(400).json({ message: "Stock must be a non-negative integer" });
+            }
+        }
         
         let batchDateObj, expirationDateObj;
         
@@ -360,6 +383,7 @@ export const updateProduct = async (req, res) => {
         if (price !== undefined) updateData.price = price;
         if (batchDateObj) updateData.batchDate = batchDateObj;
         if (expirationDateObj) updateData.expirationDate = expirationDateObj;
+        if (stock !== undefined) updateData.stock = stock; // Agregar stock al updateData si se proporciona
 
         const updatedProduct = await Product.findByIdAndUpdate(
             id,
@@ -380,6 +404,15 @@ export const updateProduct = async (req, res) => {
             message: "Product updated successfully", 
             product: productResponse
         };
+
+        // Agregar información del cambio de stock si se modificó
+        if (stock !== undefined && stock !== existingProduct.stock) {
+            response.stockChange = {
+                previousStock: existingProduct.stock,
+                newStock: stock,
+                message: `Stock actualizado de ${existingProduct.stock} a ${stock}`
+            };
+        }
 
         if (daysUntilExpiration <= 7 && daysUntilExpiration > 0) {
             response.expirationAlert = {
