@@ -18,7 +18,6 @@ import salesRoutes from './routes/sales.routes.js';
 import customerRoutes from "./routes/customer.routes.js";
 import branchesRoutes from "./routes/branches.routes.js";
 import permissionRoutes from "./routes/permission.routes.js";
-import dashboardRoutes from './routes/dashboard.routes.js';
 
 import { createInitialPermissions } from "./utils/permissions.js";
 
@@ -47,7 +46,6 @@ app.use("/api/sales", salesRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/branches", branchesRoutes);
 app.use("/api/permissions", permissionRoutes);
-app.use('/api/dashboard', dashboardRoutes);
 
 // Serve frontend build if present
 const clientBuildPath = path.join(__dirname, 'frontend', 'build');
