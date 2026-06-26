@@ -2,6 +2,10 @@ import express from "express";
 import cors from "cors";
 import connectDB from "./config/db.js";
 import "dotenv/config";
+import path from "path";
+import fs from "fs";
+import http from "http";
+import { fileURLToPath } from "url";
 
 import userRoutes from "./routes/user.routes.js";
 import roleRoutes from "./routes/role.routes.js";
@@ -17,6 +21,9 @@ import permissionRoutes from "./routes/permission.routes.js";
 import dashboardRoutes from './routes/dashboard.routes.js';
 
 import { createInitialPermissions } from "./utils/permissions.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,7 +49,17 @@ app.use("/api/branches", branchesRoutes);
 app.use("/api/permissions", permissionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
-app.listen(PORT, () => {
+// Serve frontend build if present
+const clientBuildPath = path.join(__dirname, 'frontend', 'build');
+if (fs.existsSync(clientBuildPath)) {
+  app.use(express.static(clientBuildPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+}
+
+const server = http.createServer({ maxHeaderSize: 32768 }, app);
+server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
 
